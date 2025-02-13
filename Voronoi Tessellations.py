@@ -18,6 +18,9 @@ import cv2 as cv
 import pdf2image as p2i
 import pandas as pd
 import os
+import easyocr
+import matplotlib.pyplot as plt
+
 
 def pdf_2_image(pdf_file_location,pdf_name):
     pages = p2i.convert_from_path(pdf_file_location +'/'+pdf_name+'.pdf')
