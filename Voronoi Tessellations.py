@@ -10,11 +10,13 @@
 
 
 import matplotlib.pyplot as plt
+import torch
+import torchvision
 from sklearn.cluster import KMeans
 import numpy as np
 from scipy.spatial import Voronoi
 import sys
-import cv2 as cv
+import cv2
 import pdf2image as p2i
 import pandas as pd
 import os
@@ -23,10 +25,15 @@ import matplotlib.pyplot as plt
 
 
 def pdf_2_image(pdf_file_location,pdf_name):
-    pages = p2i.convert_from_path(pdf_file_location +'/'+pdf_name+'.pdf')
-    for page in pages:
-        page.save('png files\\' + pdf_name + '.png','PNG')
-    return 'png files\\' + pdf_name + '.png'
+    try:
+        pages = p2i.convert_from_path(pdf_file_location + '/' + pdf_name + '.pdf',poppler_path=r"C:\Users\thoma\school\poppler-24.08.0\Library\bin")
+        for page in pages:
+            page.save('diagrams/raw/' + pdf_name + '.png','PNG')
+    except:
+        print('Error converting pdf to image on ' + pdf_name)
+        return None
+
+    return 'diagrams/raw/' + pdf_name + '.png'
 
 def distance(points):
     distances = []
@@ -36,46 +43,41 @@ def distance(points):
                 distances.append(np.linalg.norm(point1-point2))
     return distances
 
-def find_contour(pdf_file_location,pdf_name,blur_int,K):
-    points = []
+def find_contour(pdf_file_location,pdf_name,reader):
 
     # getting the image from pdf
-    image = cv.imread(pdf_2_image(pdf_file_location,pdf_name))
+    png_location = pdf_2_image(pdf_file_location,pdf_name)
 
-    # convert to gray scale
-    gray = cv.cvtColor(image, cv.COLOR_BGR2GRAY)
+    #Error handling
+    if png_location is not None:
+        image = cv2.imread(png_location)
+    else:
+        return None
 
-    #create blur
-    blur = cv.GaussianBlur(gray, (blur_int, blur_int),cv.BORDER_DEFAULT)
+    #Memory leakage in this method, not sure where but its happening
+    text = reader.readtext(image)
 
-    # apply blur and filter out pixels
-    ret, thresh = cv.threshold(blur, 200, 255,cv.THRESH_BINARY_INV)
+    for t in text:
+        bbox, string, score = t
+        try:
+            cv2.rectangle(image, bbox[0], bbox[2], (0, 255, 0), 5)
+        except:
+            pass
 
-    #writing the image to local disk
-    #cv.imwrite("thresh {name}.png".format(name = pdf_name),thresh)
+        #bbox[0] = top left
+        #bboc[1] = top right
+        #bbox[2] = bottom right
+        #bbox[3] = bottom left
+        if bbox is None: continue
+        else:
+            cX = (bbox[0][0] + bbox[1][0]) / 2
+            cY = (bbox[0][1]+ bbox[3][1]) / 2
+            cord = (int(cX), int(cY))
+            cv2.circle(image, cord,2,(0, 0, 255),2)
 
-    contours, hierarchies = cv.findContours(thresh, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE)
-
-    blank = np.zeros(thresh.shape[:2],dtype='uint8')
-
-    cv.drawContours(blank, contours, -1,(255, 0, 0), 1)
-
-    #cv.imwrite('contours/' + "Contours {name}.png".format(name = pdf_name), blank)
-
-    for i in contours:
-        M = cv.moments(i)
-        if M['m00'] != 0:
-            cx = int(M['m10'] / M['m00'])
-            cy = int(M['m01'] / M['m00'])
-            cv.drawContours(image, [i], -1, (0, 255, 0), 2)
-            cv.circle(image, (cx, cy), 7, (0, 0, 255), -1)
-            cv.putText(image, "center", (cx - 20, cy - 20),
-                       cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
-            points.append((cx,cy))
-            #print(f"x: {cx} y: {cy}")
-
-    cv.imwrite('contours/' + "Contours {name}.png".format(name = pdf_name), image)
-    return cluster_points(points,K,pdf_name=pdf_name)
+    cv2.imwrite('diagrams/contours/' + "{name}.png".format(name = pdf_name), image)
+    print(pdf_name + ' done')
+    #return cluster_points(points,K,pdf_name=pdf_name)
 
 def find_tessellation(pdf_file_location, pdf_name, blur_int):
     df = pd.read_csv('Name to Nodes.csv')
@@ -248,22 +250,18 @@ def plot(r,bounding_box):
     return centroids
 
 if __name__ == '__main__':
-    debug = False
-    directory = 'pdf files'
-    csv_file_name = 'data.txt'
-    file = open(csv_file_name, mode='w', newline='')
-    file.write('Name,Standard Deviation,Avg Distance\n')
+    debug = True
+    directory = 'diagrams/raw'
+    #Move This to reduce memory allocation
+    reader = easyocr.Reader(['en'], gpu=True)
     if debug:
-        #find_robots('pdf files','y24a5s6d1',9)
-        #find_robots('pdf files','y24a3s2d6',9)
-        #find_robots('pdf files','y24a3s3d3',9)
-        #find_robots('pdf files','y24a6s6d2',9)
-        #find_robots('pdf files','y17a4s14d2',9)
-        #find_robots('pdf files', 'y18a3s4d1', 9)
-        #find_robots('pdf files', 'y17a3s9d1', 9)
-        #find_robots('pdf files', 'y18a4s10d1p2', 9)
-        #find_robots('pdf files', 'y19a4s3d1', 9)
-        find_tessellation('pdf files', 'y23a5s6d1', 9)
+        for filename in os.listdir(directory):
+            f = directory + '/' + filename
+            if filename.split('.')[1] == 'png':
+                continue
+            if os.path.isfile(f):
+                name = filename[:len(filename) - 4]
+                find_contour(directory,name,reader)
     else:
         for filename in os.listdir(directory):
             f = directory + '/' + filename
@@ -273,5 +271,5 @@ if __name__ == '__main__':
                 print(name)
                 dis, stand_dev, average = find_tessellation(directory, name, 9)
                 print(name + 'completed')
-                file.write(str(name) + ',' + str(stand_dev) + ',' + str(average) + '\n')
-    file.close()
+                #file.write(str(name) + ',' + str(stand_dev) + ',' + str(average) + '\n')
+    #file.close()
