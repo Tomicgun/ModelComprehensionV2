@@ -38,6 +38,11 @@ def distance(points):
                 distances.append(np.linalg.norm(point1-point2))
     return distances
 
+#median is 25 IQR is 23 for the new contour method
+# Any text value, on line 55, less than 10 should be put through the old method
+# Then check the count and if it is still less than 10, return message to user
+# that image could not be processed, and ask the user to improve the image quality
+# Any text value above X (Probably a 100) should probably be clustered (if deemed necessary)
 def find_contour(pdf_file_location,pdf_name,reader):
 
     # getting the image from pdf
@@ -49,7 +54,7 @@ def find_contour(pdf_file_location,pdf_name,reader):
     else:
         return None
 
-    #Memory leakage in this method, not sure where but its happening
+    #Memory leakage in this method, not sure where but it's happening
     text = reader.readtext(image)
 
     for t in text:
@@ -71,7 +76,7 @@ def find_contour(pdf_file_location,pdf_name,reader):
             cv2.circle(image, cord,2,(0, 0, 255),2)
 
     cv2.imwrite('diagrams/contours/' + "{name}.png".format(name = pdf_name), image)
-    print(pdf_name + ' done')
+    print(pdf_name + ' done' + len(text))
     #return cluster_points(points,K,pdf_name=pdf_name)
 
 def find_tessellation(pdf_file_location, pdf_name, blur_int):
