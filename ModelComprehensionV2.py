@@ -43,8 +43,7 @@ def distance(points):
 # Then check the count and if it is still less than 10, return message to user
 # that image could not be processed, and ask the user to improve the image quality
 # Any text value above X (Probably a 100) should probably be clustered (if deemed necessary)
-def find_contour(pdf_file_location,pdf_name,reader):
-
+def find_contour(pdf_file_location,pdf_name,reader,blur_int):
     # getting the image from pdf
     png_location = pdf_2_image(pdf_file_location,pdf_name)
 
@@ -57,27 +56,67 @@ def find_contour(pdf_file_location,pdf_name,reader):
     #Memory leakage in this method, not sure where but it's happening
     text = reader.readtext(image)
 
-    for t in text:
-        bbox, string, score = t
-        try:
-            cv2.rectangle(image, bbox[0], bbox[2], (0, 255, 0), 5)
-        except:
-            pass
+    if(len(text) < 10):
+        #Do old Method
+        data_points = []
 
-        #bbox[0] = top left
-        #bboc[1] = top right
-        #bbox[2] = bottom right
-        #bbox[3] = bottom left
-        if bbox is None: continue
+        # convert to gray scale
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        # create blur 11 was chosen after testing
+        blur = cv2.GaussianBlur(gray, (blur_int,blur_int), cv2.BORDER_DEFAULT)
+
+        # apply blur and filter out pixels
+        ret, thresh = cv2.threshold(blur, 200, 255, cv2.THRESH_BINARY_INV)
+
+        contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+        blank = np.zeros(thresh.shape[:2], dtype='uint8')
+
+        cv2.drawContours(blank, contours, -1, (255, 0, 0), 1)
+
+        # cv.imwrite('contours/' + "Contours {name}.png".format(name = pdf_name), blank)
+        if(len(contours) < 10):
+            print("Both Methods Failed to find sufficient data to run rest of algorithm")
         else:
-            cX = (bbox[0][0] + bbox[1][0]) / 2
-            cY = (bbox[0][1]+ bbox[3][1]) / 2
-            cord = (int(cX), int(cY))
-            cv2.circle(image, cord,2,(0, 0, 255),2)
+            for i in contours:
+                M = cv2.moments(i)
+                if M['m00'] != 0:
+                    cx = int(M['m10'] / M['m00'])
+                    cy = int(M['m01'] / M['m00'])
+                    cv2.drawContours(image, [i], -1, (0, 255, 0), 2)
+                    cv2.circle(image, (cx, cy), 7, (0, 0, 255), -1)
+                    cv2.putText(image, "center", (cx - 20, cy - 20),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
+                    data_points.append((cx, cy))
+        cv2.imwrite('diagrams/contours/' + "{name}.png".format(name=pdf_name), image)
+    else:
+        #print("New Method used for " + pdf_name)
+        data_points = []
+        #Do New Method
+        for t in text:
+            bbox, string, score = t
+            try:
+                cv2.rectangle(image, bbox[0], bbox[2], (0, 255, 0), 5)
+            except:
+                pass
 
-    cv2.imwrite('diagrams/contours/' + "{name}.png".format(name = pdf_name), image)
-    print(pdf_name + ' done' + len(text))
-    #return cluster_points(points,K,pdf_name=pdf_name)
+            #bbox[0] = top left
+            #bboc[1] = top right
+            #bbox[2] = bottom right
+            #bbox[3] = bottom left
+            if bbox is None: continue
+            else:
+                cX = (bbox[0][0] + bbox[1][0]) / 2
+                cY = (bbox[0][1]+ bbox[3][1]) / 2
+                cord = (int(cX), int(cY))
+                cv2.circle(image, cord,2,(0, 0, 255),2)
+                data_points.append(cord)
+        cv2.imwrite('diagrams/contours/' + "{name}.png".format(name=pdf_name), image)
+
+
+    print(pdf_name + ' done ' + str(len(data_points)))
+    #return cluster_points(data_points,K,pdf_name)
 
 def find_tessellation(pdf_file_location, pdf_name, blur_int):
     df = pd.read_csv('Name to Nodes.csv')
@@ -261,7 +300,7 @@ if __name__ == '__main__':
                 continue
             if os.path.isfile(f):
                 name = filename[:len(filename) - 4]
-                find_contour(directory,name,reader)
+                find_contour(directory,name,reader,11)
     else:
         for filename in os.listdir(directory):
             f = directory + '/' + filename
