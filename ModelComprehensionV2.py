@@ -43,79 +43,19 @@ def distance(points):
 # Then check the count and if it is still less than 10, return message to user
 # that image could not be processed, and ask the user to improve the image quality
 # Any text value above X (Probably a 100) should probably be clustered (if deemed necessary)
-def find_contour(pdf_file_location,pdf_name,reader,blur_int):
-    # getting the image from pdf
-    png_location = pdf_2_image(pdf_file_location,pdf_name)
+def find_contour(pdf_file_location, pdf_name, ocr_reader):
+    ocr_image, ocr_data = optical_character_recognition(pdf_file_location, pdf_name, ocr_reader)
 
-    #Error handling
-    if png_location is not None:
-        image = cv2.imread(png_location)
-    else:
-        return None
+    if len(ocr_data) <= 6:
+        opencv_image, opencv_data = pure_open_cv_method(pdf_file_location,pdf_name)
 
-    #Memory leakage in this method, not sure where but it's happening
-    text = reader.readtext(image)
+        if len(ocr_data) < len(opencv_data):
+            cv2.imwrite('diagrams/contours/' + "{name}.png".format(name=pdf_name), opencv_image)
+            print(pdf_name + ' done ' + str(len(opencv_data)))
+            return None
 
-    if(len(text) < 10):
-        #Do old Method
-        data_points = []
-
-        # convert to gray scale
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        # create blur 11 was chosen after testing
-        blur = cv2.GaussianBlur(gray, (blur_int,blur_int), cv2.BORDER_DEFAULT)
-
-        # apply blur and filter out pixels
-        ret, thresh = cv2.threshold(blur, 200, 255, cv2.THRESH_BINARY_INV)
-
-        contours, _ = cv2.findContours(thresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-
-        blank = np.zeros(thresh.shape[:2], dtype='uint8')
-
-        cv2.drawContours(blank, contours, -1, (255, 0, 0), 1)
-
-        # cv.imwrite('contours/' + "Contours {name}.png".format(name = pdf_name), blank)
-        if(len(contours) < 10):
-            print("Both Methods Failed to find sufficient data to run rest of algorithm")
-        else:
-            for i in contours:
-                M = cv2.moments(i)
-                if M['m00'] != 0:
-                    cx = int(M['m10'] / M['m00'])
-                    cy = int(M['m01'] / M['m00'])
-                    cv2.drawContours(image, [i], -1, (0, 255, 0), 2)
-                    cv2.circle(image, (cx, cy), 7, (0, 0, 255), -1)
-                    cv2.putText(image, "center", (cx - 20, cy - 20),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
-                    data_points.append((cx, cy))
-        cv2.imwrite('diagrams/contours/' + "{name}.png".format(name=pdf_name), image)
-    else:
-        #print("New Method used for " + pdf_name)
-        data_points = []
-        #Do New Method
-        for t in text:
-            bbox, string, score = t
-            try:
-                cv2.rectangle(image, bbox[0], bbox[2], (0, 255, 0), 5)
-            except:
-                pass
-
-            #bbox[0] = top left
-            #bboc[1] = top right
-            #bbox[2] = bottom right
-            #bbox[3] = bottom left
-            if bbox is None: continue
-            else:
-                cX = (bbox[0][0] + bbox[1][0]) / 2
-                cY = (bbox[0][1]+ bbox[3][1]) / 2
-                cord = (int(cX), int(cY))
-                cv2.circle(image, cord,2,(0, 0, 255),2)
-                data_points.append(cord)
-        cv2.imwrite('diagrams/contours/' + "{name}.png".format(name=pdf_name), image)
-
-
-    print(pdf_name + ' done ' + str(len(data_points)))
+    cv2.imwrite('diagrams/contours/' + "{name}.png".format(name=pdf_name), ocr_image)
+    print(pdf_name + ' done ' + str(len(ocr_data)))
     #return cluster_points(data_points,K,pdf_name)
 
 def find_tessellation(pdf_file_location, pdf_name, blur_int):
@@ -288,6 +228,90 @@ def plot(r,bounding_box):
     centroids = np.asarray(centroids)
     return centroids
 
+def pure_open_cv_method(pdf_file_location,pdf_name):
+    # getting the image from pdf
+    png_location = pdf_2_image(pdf_file_location,pdf_name)
+
+    #Error handling
+    if png_location is not None:
+        image = cv2.imread(png_location)
+    else:
+        return None
+
+    # This method was taken from this stack exchange page https://stackoverflow.com/questions/37771263/detect-text-area-in-an-image-using-python-and-opencv
+    # OP username is nathancy
+    # Do old Method
+    data_points = []
+
+    # Load image, grayscale, Gaussian blur, adaptive threshold
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # using slightly less blurr
+    blur = cv2.GaussianBlur(gray, (9, 9), 0)
+
+    # block size control how large the regions are, c is a constant that is subtracted from mean, and infulences how many points are foind at the end
+    # for block size 9 or 11 are good, for c 30 is the sweet spot more or less simply degrades results.
+    thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 9, 30)
+
+    # Dilate to combine adjacent text contours
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
+    dilate = cv2.dilate(thresh, kernel, iterations=4)
+
+    # Find contours, highlight text areas, and extract ROIs
+    contours = cv2.findContours(dilate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # if it finds only 2 contours keep the head, if not remvoe the head contour
+    contours = contours[0] if len(contours) == 2 else contours[1]
+
+    # Do the drawing and saving of points
+    for c in contours:
+        area = cv2.contourArea(c)
+        if area > 1000:
+            x, y, w, h = cv2.boundingRect(c)
+            cv2.rectangle(image, (x, y), (x + w, y + h), (36, 255, 12), 3)
+            cv2.circle(image, (x + w // 2, y + h // 2), 10, (255, 0, 0), 2)
+            data_points.append((x, y))
+
+    return image, data_points
+
+def optical_character_recognition(pdf_file_location,pdf_name,reader):
+    # getting the image from pdf
+    png_location = pdf_2_image(pdf_file_location,pdf_name)
+
+    #Error handling
+    if png_location is not None:
+        image = cv2.imread(png_location)
+    else:
+        return None
+
+    #Memory leakage in this method, not sure where but it's happening
+    text = reader.readtext(image)
+
+    # print("New Method used for " + pdf_name)
+    data_points = []
+    # Do New Method
+    for t in text:
+        bbox, string, score = t
+        try:
+            cv2.rectangle(image, bbox[0], bbox[2], (0, 255, 0), 5)
+        except:
+            pass
+
+        # bbox[0] = top left
+        # bboc[1] = top right
+        # bbox[2] = bottom right
+        # bbox[3] = bottom left
+        if bbox is None:
+            continue
+        else:
+            cX = (bbox[0][0] + bbox[1][0]) / 2
+            cY = (bbox[0][1] + bbox[3][1]) / 2
+            cord = (int(cX), int(cY))
+            cv2.circle(image, cord, 2, (0, 0, 255), 2)
+            data_points.append(cord)
+
+    return image, data_points
+
 if __name__ == '__main__':
     debug = True
     directory = 'diagrams/raw'
@@ -300,7 +324,7 @@ if __name__ == '__main__':
                 continue
             if os.path.isfile(f):
                 name = filename[:len(filename) - 4]
-                find_contour(directory,name,reader,11)
+                find_contour(directory,name,reader)
     else:
         for filename in os.listdir(directory):
             f = directory + '/' + filename
