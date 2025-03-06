@@ -1,0 +1,25 @@
+[project]
+name = "model-comprehension-v2"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "PiesArentSquare",email = "jjhh12@outlook.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy (>=2.2.3,<3.0.0)",
+    "pandas (>=2.2.3,<3.0.0)",
+    "opencv-python (>=4.11.0.86,<5.0.0.0)",
+    "scikit-learn (>=1.6.1,<2.0.0)",
+    "pdf2image (>=1.17.0,<2.0.0)",
+    "matplotlib (>=3.10.1,<4.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "model_comprehension_v2", from = "src"}]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
