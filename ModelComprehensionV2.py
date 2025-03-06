@@ -13,7 +13,7 @@ import numpy as np
 from scipy.spatial import Voronoi
 import sys
 import cv2
-import pdf2image as p2i
+import pymupdf
 import pandas as pd
 import os
 import easyocr
@@ -22,8 +22,8 @@ import matplotlib.pyplot as plt
 
 def pdf_2_image(pdf_file_location,pdf_name):
     try:
-        pages = p2i.convert_from_path(pdf_file_location + '/' + pdf_name + '.pdf',poppler_path=r"C:\Users\thoma\school\poppler-24.08.0\Library\bin")
-        pages.pop().save('diagrams/raw/' + pdf_name + '.png','PNG')
+        with pymupdf.open(os.path.join(pdf_file_location, pdf_name + '.pdf')) as pdf:
+            pdf.load_page(0).get_pixmap(dpi=300).save(os.path.join(pdf_file_location, pdf_name + '.png'), 'PNG')
     except:
         print('Error converting pdf to image on ' + pdf_name)
         return None
@@ -44,7 +44,10 @@ def distance(points):
 # that image could not be processed, and ask the user to improve the image quality
 # Any text value above X (Probably a 100) should probably be clustered (if deemed necessary)
 def find_contour(pdf_file_location, pdf_name, ocr_reader):
-    ocr_image, ocr_data = optical_character_recognition(pdf_file_location, pdf_name, ocr_reader)
+    ocr_result = optical_character_recognition(pdf_file_location, pdf_name, ocr_reader)
+    if ocr_result is None:
+        return
+    ocr_image, ocr_data = ocr_result
 
     if len(ocr_data) <= 6:
         opencv_image, opencv_data = pure_open_cv_method(pdf_file_location,pdf_name)
@@ -316,7 +319,7 @@ if __name__ == '__main__':
     debug = True
     directory = 'diagrams/raw'
     #Move This to reduce memory allocation
-    reader = easyocr.Reader(['en'], gpu=True)
+    reader = easyocr.Reader(['en'], gpu=False)
     if debug:
         for filename in os.listdir(directory):
             f = directory + '/' + filename
