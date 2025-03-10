@@ -16,19 +16,20 @@ import cv2
 import pymupdf
 import pandas as pd
 import os
-import easyocr
+from doctr.models import ocr_predictor
+from doctr.io import DocumentFile
 import matplotlib.pyplot as plt
 
-
-def pdf_2_image(pdf_file_location,pdf_name):
+def pdf_2_image(filepath, outdir):
     try:
-        with pymupdf.open(os.path.join(pdf_file_location, pdf_name + '.pdf')) as pdf:
-            pdf.load_page(0).get_pixmap(dpi=300).save(os.path.join(pdf_file_location, pdf_name + '.png'), 'PNG')
+        with pymupdf.open(filepath) as pdf:
+            png_filename = os.path.splitext(os.path.basename(filepath))[0] + '.png'
+            png_filepath = os.path.join(outdir, png_filename)
+            pdf.load_page(0).get_pixmap(dpi=300).save(png_filepath)
+            return png_filepath
     except:
-        print('Error converting pdf to image on ' + pdf_name)
+        print(f'failed to convert {filepath} to image')
         return None
-
-    return 'diagrams/raw/' + pdf_name + '.png'
 
 def distance(points):
     distances = []
@@ -43,25 +44,24 @@ def distance(points):
 # Then check the count and if it is still less than 10, return message to user
 # that image could not be processed, and ask the user to improve the image quality
 # Any text value above X (Probably a 100) should probably be clustered (if deemed necessary)
-def find_contour(pdf_file_location, pdf_name, ocr_reader):
-    ocr_result = optical_character_recognition(pdf_file_location, pdf_name, ocr_reader)
+def find_contour(png_filepath, pdf_name, ocr_reader, allow_fallback=True):
+    ocr_result = optical_character_recognition(png_filepath, pdf_name, ocr_reader)
     if ocr_result is None:
         return
-    ocr_image, ocr_data = ocr_result
+    image, data = ocr_result
 
-    if len(ocr_data) <= 6:
-        opencv_image, opencv_data = pure_open_cv_method(pdf_file_location,pdf_name)
-
-        if len(ocr_data) < len(opencv_data):
-            cv2.imwrite('diagrams/contours/' + "{name}.png".format(name=pdf_name), opencv_image)
-            print(pdf_name + ' done ' + str(len(opencv_data)))
-            return None
-
-    cv2.imwrite('diagrams/contours/' + "{name}.png".format(name=pdf_name), ocr_image)
-    print(pdf_name + ' done ' + str(len(ocr_data)))
+    if allow_fallback and len(data) <= 6:
+        opencv_image, opencv_data = pure_open_cv_method(png_filepath,pdf_name)
+        if len(data) < len(opencv_data):
+            data = opencv_data
+            image = opencv_image
+            print(f'old method better for {pdf_name}')
+            
+    cv2.imwrite(f'diagrams/contours/{pdf_name}.png', image)
+    print(f'{pdf_name} done; {len(data)} points found')
     #return cluster_points(data_points,K,pdf_name)
 
-def find_tessellation(pdf_file_location, pdf_name, blur_int):
+def find_tessellation(png_filepath, pdf_name, blur_int):
     df = pd.read_csv('Name to Nodes.csv')
     df.columns = ['Name','Nodes']
     df = df[df['Name'] == pdf_name]
@@ -69,7 +69,7 @@ def find_tessellation(pdf_file_location, pdf_name, blur_int):
         print('PDF not in table')
         return 0,0,0
     K = df.values.flatten().tolist()[1]
-    tesselation = find_contour(pdf_file_location,pdf_name,blur_int,K)
+    tesselation = find_contour(png_filepath,pdf_name,blur_int,K)
     if len(tesselation) == 0:
         print('No center points found')
         return 0,0,0
@@ -91,7 +91,7 @@ def find_tessellation(pdf_file_location, pdf_name, blur_int):
         dis = distance(centroids)
         stan_dev = np.std(dis, axis=0)
         average = np.average(dis, axis=0)
-    plt.savefig("Voronoi Tessellations/voronoi graph {name}.png".format(name = pdf_name))
+    plt.savefig(f'Voronoi Tessellations/voronoi graph {pdf_name}.png')
     plt.close()
     return dis, stan_dev, average
 
@@ -231,15 +231,8 @@ def plot(r,bounding_box):
     centroids = np.asarray(centroids)
     return centroids
 
-def pure_open_cv_method(pdf_file_location,pdf_name):
-    # getting the image from pdf
-    png_location = pdf_2_image(pdf_file_location,pdf_name)
-
-    #Error handling
-    if png_location is not None:
-        image = cv2.imread(png_location)
-    else:
-        return None
+def pure_open_cv_method(png_filepath,pdf_name):
+    image = cv2.imread(png_filepath)
 
     # This method was taken from this stack exchange page https://stackoverflow.com/questions/37771263/detect-text-area-in-an-image-using-python-and-opencv
     # OP username is nathancy
@@ -277,65 +270,40 @@ def pure_open_cv_method(pdf_file_location,pdf_name):
 
     return image, data_points
 
-def optical_character_recognition(pdf_file_location,pdf_name,reader):
-    # getting the image from pdf
-    png_location = pdf_2_image(pdf_file_location,pdf_name)
+def optical_character_recognition(png_filepath,pdf_name,predictor):
+    image = cv2.imread(png_filepath)
 
-    #Error handling
-    if png_location is not None:
-        image = cv2.imread(png_location)
-    else:
-        return None
+    result = predictor(DocumentFile.from_images(png_filepath))
 
-    #Memory leakage in this method, not sure where but it's happening
-    text = reader.readtext(image)
+    lines = [line for block in result.pages[0].blocks for line in block.lines]
+    dims = result.pages[0].dimensions
 
-    # print("New Method used for " + pdf_name)
-    data_points = []
-    # Do New Method
-    for t in text:
-        bbox, string, score = t
-        try:
-            cv2.rectangle(image, bbox[0], bbox[2], (0, 255, 0), 5)
-        except:
-            pass
+    data_points = [
+        (int(round((line.geometry[0][0] + line.geometry[1][0]) / 2 * dims[1])),
+         int(round((line.geometry[0][1] + line.geometry[1][1]) / 2 * dims[0])))
+        for line in lines
+    ]
 
-        # bbox[0] = top left
-        # bboc[1] = top right
-        # bbox[2] = bottom right
-        # bbox[3] = bottom left
-        if bbox is None:
-            continue
-        else:
-            cX = (bbox[0][0] + bbox[1][0]) / 2
-            cY = (bbox[0][1] + bbox[3][1]) / 2
-            cord = (int(cX), int(cY))
-            cv2.circle(image, cord, 2, (0, 0, 255), 2)
-            data_points.append(cord)
+    for c in data_points:
+        cv2.circle(image, c, 10, (0, 0, 255), 5)
 
     return image, data_points
 
 if __name__ == '__main__':
     debug = True
+    allow_old_contour_fallback = True
     directory = 'diagrams/raw'
-    #Move This to reduce memory allocation
-    reader = easyocr.Reader(['en'], gpu=False)
-    if debug:
-        for filename in os.listdir(directory):
-            f = directory + '/' + filename
-            if filename.split('.')[1] == 'png':
-                continue
-            if os.path.isfile(f):
-                name = filename[:len(filename) - 4]
-                find_contour(directory,name,reader)
-    else:
-        for filename in os.listdir(directory):
-            f = directory + '/' + filename
-            # checking if it is a file
-            if os.path.isfile(f):
-                name = filename[:len(filename) - 4]
-                print(name)
-                dis, stand_dev, average = find_tessellation(directory, name, 9)
-                print(name + 'completed')
-                #file.write(str(name) + ',' + str(stand_dev) + ',' + str(average) + '\n')
-    #file.close()
+    predictor = ocr_predictor(pretrained=True)
+    for filename in os.listdir(directory):
+        file = os.path.join(directory, filename)
+        if not os.path.isfile(file):
+            continue
+        png_filepath = pdf_2_image(file, 'diagrams/png')
+        if png_filepath is None:
+            continue
+        stem = os.path.splitext(os.path.basename(filename))[0]
+        if debug:
+            find_contour(png_filepath, stem, predictor, allow_old_contour_fallback)
+        else:
+            dis, stand_dev, average = find_tessellation(png_filepath, stem, 9)
+            print(dis, stand_dev, average)
