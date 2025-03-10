@@ -10,16 +10,22 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy (>=2.2.3,<3.0.0)",
     "pandas (>=2.2.3,<3.0.0)",
-    "opencv-python (>=4.11.0.86,<5.0.0.0)",
     "scikit-learn (>=1.6.1,<2.0.0)",
     "matplotlib (>=3.10.1,<4.0.0)",
-    "easyocr (>=1.7.2,<2.0.0)",
-    "pymupdf (>=1.25.3,<2.0.0)"
+    "pymupdf (>=1.25.3,<2.0.0)",
+    "keras-ocr (>=0.9.3,<0.10.0)",
+    "torch (>=2.6.0,<3.0.0)",
+    "python-doctr (>=0.11.0,<0.12.0)",
+    "torchvision (>=0.21.0,<0.22.0)",
+    "opencv-contrib-python (>=4.11.0.86,<5.0.0.0)",
+    "opencv-python (>=4.11.0.86,<5.0.0.0)",
 ]
 
 [tool.poetry]
 packages = [{include = "model_comprehension_v2", from = "src"}]
 
+[tool.poetry.dependencies]
+python = ">=3.12,<4"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
