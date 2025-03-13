@@ -10,6 +10,7 @@
 
 from sklearn.cluster import KMeans
 import numpy as np
+from sklearn.cluster import MeanShift
 from scipy.spatial import Voronoi
 import sys
 import cv2
@@ -44,6 +45,7 @@ def distance(points):
 # Then check the count and if it is still less than 10, return message to user
 # that image could not be processed, and ask the user to improve the image quality
 # Any text value above X (Probably a 100) should probably be clustered (if deemed necessary)
+
 def find_contour(png_filepath, pdf_name, ocr_reader, allow_fallback=True):
     ocr_result = optical_character_recognition(png_filepath, pdf_name, ocr_reader)
     if ocr_result is None:
@@ -59,6 +61,10 @@ def find_contour(png_filepath, pdf_name, ocr_reader, allow_fallback=True):
             
     cv2.imwrite(f'diagrams/contours/{pdf_name}.png', image)
     print(f'{pdf_name} done; {len(data)} points found')
+
+    if(len(ocr_data) > 100):
+        cluster_points(ocr_data,pdf_name)
+        
     #return cluster_points(data_points,K,pdf_name)
 
 def find_tessellation(png_filepath, pdf_name, blur_int):
@@ -91,33 +97,30 @@ def find_tessellation(png_filepath, pdf_name, blur_int):
         dis = distance(centroids)
         stan_dev = np.std(dis, axis=0)
         average = np.average(dis, axis=0)
+
     plt.savefig(f'Voronoi Tessellations/voronoi graph {pdf_name}.png')
     plt.close()
     return dis, stan_dev, average
 
 
-def cluster_points(points,K,pdf_name):
-    if K == 0:
-        return []
-    if(len(points) <= K):
-        K = len(points)
-        print('REDO BLUR TOO HIGH')
-    kmeans = KMeans(n_clusters=K,max_iter=10000)
-    kmeans.fit(points)
-    centers = kmeans.cluster_centers_
-    pred = kmeans.fit_predict(points)
+def cluster_points(points,pdf_name):
+    mean_shift = MeanShift(bandwidth=100,n_jobs=4)
+    mean_shift.fit(points)
+    centers = mean_shift.cluster_centers_
+    pred = mean_shift.predict(points)
     plot_clusters(centers,pred,points,pdf_name)
-    return centers
 
-def plot_clusters(centers,pred,X,pdf_name):
+def plot_clusters(centers,pred,points,pdf_name):
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
-    plt.scatter(*zip(*X), c=pred)
+    plt.scatter(*zip(*points), c=pred)
     plt.grid(True)
     for center in centers:
         center = center[:2]
         plt.scatter(center[0], center[1], marker='^', c='red')
-    plt.savefig("Cluster Graphs/clusters {name}.png".format(name = pdf_name))
+
+    print(pdf_name + " was clustered " + str(len(centers)))
+    plt.savefig("diagrams/clusters/clusters {name}.png".format(name = pdf_name))
     plt.close()
     #plt.show()
 
@@ -278,6 +281,7 @@ def optical_character_recognition(png_filepath,pdf_name,predictor):
     lines = [line for block in result.pages[0].blocks for line in block.lines]
     dims = result.pages[0].dimensions
 
+
     data_points = [
         (int(round((line.geometry[0][0] + line.geometry[1][0]) / 2 * dims[1])),
          int(round((line.geometry[0][1] + line.geometry[1][1]) / 2 * dims[0])))
@@ -286,7 +290,7 @@ def optical_character_recognition(png_filepath,pdf_name,predictor):
 
     for c in data_points:
         cv2.circle(image, c, 10, (0, 0, 255), 5)
-
+        
     return image, data_points
 
 if __name__ == '__main__':
