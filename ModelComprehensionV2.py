@@ -8,7 +8,7 @@
 #                                                                              #
 ################################################################################
 
-from sklearn.cluster import KMeans
+
 import numpy as np
 from sklearn.cluster import MeanShift
 from scipy.spatial import Voronoi
@@ -62,8 +62,8 @@ def find_contour(png_filepath, pdf_name, ocr_reader, allow_fallback=True):
     cv2.imwrite(f'diagrams/contours/{pdf_name}.png', image)
     print(f'{pdf_name} done; {len(data)} points found')
 
-    if(len(ocr_data) > 100):
-        cluster_points(ocr_data,pdf_name)
+    #if(len(data) > 100):
+        #cluster_points(data,pdf_name)
         
     #return cluster_points(data_points,K,pdf_name)
 
