@@ -32,12 +32,22 @@ def pdf_2_image(filepath, outdir):
         print(f'failed to convert {filepath} to image')
         return None
 
+def get_bounding_box(filepath):
+    try:
+        with pymupdf.open(filepath) as pdf:
+            #assumes a dpi of 300
+            return pdf.load_page(0).mediabox_size.x * 300 / 72, pdf.load_page(0).mediabox_size.y * 300 / 72
+    except:
+        print(f'failed to load {filepath} to image')
+        return None
+
+
 def distance(points):
     distances = []
     for point1 in points:
         for point2 in points:
             if point1[0] != point2[0] and point1[1] != point2[1]:
-                distances.append(np.linalg.norm(point1-point2))
+                distances.append(np.linalg.norm(np.subtract(point1, point2)))
     return distances
 
 #median is 25 IQR is 23 for the new contour method
@@ -47,25 +57,25 @@ def distance(points):
 # Any text value above X (Probably a 100) should probably be clustered (if deemed necessary)
 
 def find_contour(png_filepath, pdf_name, ocr_reader, allow_fallback=True):
-    ocr_result = optical_character_recognition(png_filepath, pdf_name, ocr_reader)
+    ocr_result = optical_character_recognition(png_filepath, ocr_reader)
     if ocr_result is None:
         return
     image, data = ocr_result
 
     if allow_fallback and len(data) <= 6:
-        opencv_image, opencv_data = pure_open_cv_method(png_filepath,pdf_name)
+        opencv_image, opencv_data = pure_open_cv_method(png_filepath)
         if len(data) < len(opencv_data):
             data = opencv_data
             image = opencv_image
             print(f'old method better for {pdf_name}')
             
-    cv2.imwrite(f'diagrams/contours/{pdf_name}.png', image)
+    cv2.imwrite(f'test/contours/{pdf_name}.png', image)
     print(f'{pdf_name} done; {len(data)} points found')
 
-    #if(len(data) > 100):
-        #cluster_points(data,pdf_name)
+    if(len(data) > 100):
+        cluster_points(data,pdf_name)
         
-    #return cluster_points(data_points,K,pdf_name)
+    return data
 
 def find_tessellation(png_filepath, pdf_name, blur_int):
     df = pd.read_csv('Name to Nodes.csv')
@@ -98,7 +108,7 @@ def find_tessellation(png_filepath, pdf_name, blur_int):
         stan_dev = np.std(dis, axis=0)
         average = np.average(dis, axis=0)
 
-    plt.savefig(f'Voronoi Tessellations/voronoi graph {pdf_name}.png')
+    plt.savefig(f'test/voronoi {pdf_name}.png')
     plt.close()
     return dis, stan_dev, average
 
@@ -120,9 +130,8 @@ def plot_clusters(centers,pred,points,pdf_name):
         plt.scatter(center[0], center[1], marker='^', c='red')
 
     print(pdf_name + " was clustered " + str(len(centers)))
-    plt.savefig("diagrams/clusters/clusters {name}.png".format(name = pdf_name))
+    plt.savefig("test/clusters/{name}.png".format(name = pdf_name))
     plt.close()
-    #plt.show()
 
 
 def in_box(robots, bounding_box):
@@ -234,7 +243,7 @@ def plot(r,bounding_box):
     centroids = np.asarray(centroids)
     return centroids
 
-def pure_open_cv_method(png_filepath,pdf_name):
+def pure_open_cv_method(png_filepath):
     image = cv2.imread(png_filepath)
 
     # This method was taken from this stack exchange page https://stackoverflow.com/questions/37771263/detect-text-area-in-an-image-using-python-and-opencv
@@ -273,7 +282,7 @@ def pure_open_cv_method(png_filepath,pdf_name):
 
     return image, data_points
 
-def optical_character_recognition(png_filepath,pdf_name,predictor):
+def optical_character_recognition(png_filepath,predictor):
     image = cv2.imread(png_filepath)
 
     result = predictor(DocumentFile.from_images(png_filepath))
@@ -296,18 +305,26 @@ def optical_character_recognition(png_filepath,pdf_name,predictor):
 if __name__ == '__main__':
     debug = True
     allow_old_contour_fallback = True
-    directory = 'diagrams/raw'
+    directory = 'test/raw'
     predictor = ocr_predictor(pretrained=True)
     for filename in os.listdir(directory):
         file = os.path.join(directory, filename)
         if not os.path.isfile(file):
             continue
-        png_filepath = pdf_2_image(file, 'diagrams/png')
+        png_filepath = pdf_2_image(file, 'test/png')
         if png_filepath is None:
             continue
         stem = os.path.splitext(os.path.basename(filename))[0]
         if debug:
-            find_contour(png_filepath, stem, predictor, allow_old_contour_fallback)
+            data = find_contour(png_filepath, stem, predictor, allow_old_contour_fallback)
+            X, Y = get_bounding_box(file)
+            bounding_box = [0, X, 0, Y]
+            data = np.array(data)
+            centroids = plot(data, bounding_box)
+            plt.savefig("test/voronoi/{name}.png".format(name=filename))
+            plt.close()
+            print("Stand dev " + str(np.std(centroids)))
+            print("Average " + str(np.mean(centroids)))
         else:
             dis, stand_dev, average = find_tessellation(png_filepath, stem, 9)
             print(dis, stand_dev, average)
