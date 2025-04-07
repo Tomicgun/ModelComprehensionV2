@@ -11,6 +11,8 @@
 from sklearn.cluster import KMeans
 import numpy as np
 from scipy.spatial import Voronoi
+from scipy.stats import gaussian_kde
+from scipy.signal import find_peaks
 import sys
 import cv2
 import pymupdf
@@ -35,7 +37,7 @@ def distance(points):
     distances = []
     for point1 in points:
         for point2 in points:
-            if point1[0] != point2[0] and point1[1] != point2[1]:
+            if point1[0] != point2[0] or point1[1] != point2[1]:
                 distances.append(np.linalg.norm(point1-point2))
     return distances
 
@@ -44,32 +46,32 @@ def distance(points):
 # Then check the count and if it is still less than 10, return message to user
 # that image could not be processed, and ask the user to improve the image quality
 # Any text value above X (Probably a 100) should probably be clustered (if deemed necessary)
-def find_contour(png_filepath, pdf_name, ocr_reader, allow_fallback=True):
+def find_contour(png_filepath, pdf_name, ocr_reader, root_dir, allow_fallback=True):
     ocr_result = optical_character_recognition(png_filepath, pdf_name, ocr_reader)
     if ocr_result is None:
         return
     image, data = ocr_result
 
     if allow_fallback and len(data) <= 6:
-        opencv_image, opencv_data = pure_open_cv_method(png_filepath,pdf_name)
+        opencv_image, opencv_data = pure_open_cv_method(png_filepath, pdf_name)
         if len(data) < len(opencv_data):
             data = opencv_data
             image = opencv_image
             print(f'old method better for {pdf_name}')
             
-    cv2.imwrite(f'diagrams/contours/{pdf_name}.png', image)
+    cv2.imwrite(f'{root_dir}/contours/{pdf_name}.png', image)
     print(f'{pdf_name} done; {len(data)} points found')
-    #return cluster_points(data_points,K,pdf_name)
+    # return cluster_points(data_points,K,pdf_name)
 
-def find_tessellation(png_filepath, pdf_name, blur_int):
-    df = pd.read_csv('Name to Nodes.csv')
-    df.columns = ['Name','Nodes']
-    df = df[df['Name'] == pdf_name]
-    if df.shape[0] == 0:
-        print('PDF not in table')
-        return 0,0,0
-    K = df.values.flatten().tolist()[1]
-    tesselation = find_contour(png_filepath,pdf_name,blur_int,K)
+def find_tessellation(png_filepath, pdf_name, ocr_predictor, allow_fallback, root_dir):
+    # df = pd.read_csv('Name to Nodes.csv')
+    # df.columns = ['Name','Nodes']
+    # df = df[df['Name'] == pdf_name]
+    # if df.shape[0] == 0:
+    #     print('PDF not in table')
+    #     return 0,0,0
+    # K = df.values.flatten().tolist()[1]
+    tesselation = find_contour(png_filepath,pdf_name,ocr_predictor, root_dir, allow_fallback)
     if len(tesselation) == 0:
         print('No center points found')
         return 0,0,0
@@ -91,7 +93,7 @@ def find_tessellation(png_filepath, pdf_name, blur_int):
         dis = distance(centroids)
         stan_dev = np.std(dis, axis=0)
         average = np.average(dis, axis=0)
-    plt.savefig(f'Voronoi Tessellations/voronoi graph {pdf_name}.png')
+    plt.savefig(f'{root_dir}/voronoi/{pdf_name}.png')
     plt.close()
     return dis, stan_dev, average
 
@@ -289,9 +291,39 @@ def optical_character_recognition(png_filepath,pdf_name,predictor):
 
     return image, data_points
 
+def normalize_points(image, data_points, scaling_factor):
+    scaled_points = [(x / scaling_factor, y / scaling_factor) for (x,y) in data_points]
+    return image, scaled_points
+
+
+def normalize_points_by_resolution(image, data_points):
+    # 1 / average dimension * 1000 to bring data roughly into [0,1000]
+    scaling_factor = 2000 / (image.shape[0] + image.shape[2])
+    return normalize_points(image, data_points, scaling_factor)
+    
+def normalize_points_by_font_size(lines, page_dimensions, image, data_points):
+    heights = np.array([(line.geometry[1][1] - line.geometry[0][1]) * page_dimensions[0] for line in lines])
+
+    # use kernel density estimation to find the mode (most common) font size
+    kde = gaussian_kde(heights, bw_method=0.3)
+    x_grid = np.linspace(min(heights) - 1, max(heights) + 1, 1000)
+    kde_values = kde(x_grid)
+    peaks, _ = find_peaks(kde_values)
+    if len(peaks) > 0:
+        font_size = x_grid[peaks[np.argmax(kde_values[peaks])]]
+        print(f'estimated mode {font_size:.2f}')
+    else:
+        # fall back to average
+        font_size = np.mean(heights)
+        print(f'fell back to average: f{font_size:.2f}')
+        
+    # scale font size to 12pt
+    return normalize_points(image, data_points, 12 / font_size)
+
+
 if __name__ == '__main__':
-    debug = True
-    allow_old_contour_fallback = True
+    debug = False
+    allow_old_contour_fallback = False
     directory = 'diagrams/raw'
     predictor = ocr_predictor(pretrained=True)
     for filename in os.listdir(directory):
@@ -303,7 +335,7 @@ if __name__ == '__main__':
             continue
         stem = os.path.splitext(os.path.basename(filename))[0]
         if debug:
-            find_contour(png_filepath, stem, predictor, allow_old_contour_fallback)
+            find_contour(png_filepath, stem, predictor, 'diagrams', allow_old_contour_fallback)
         else:
-            dis, stand_dev, average = find_tessellation(png_filepath, stem, 9)
+            dis, stand_dev, average = find_tessellation(png_filepath, stem, predictor, allow_old_contour_fallback, 'diagrams')
             print(dis, stand_dev, average)
