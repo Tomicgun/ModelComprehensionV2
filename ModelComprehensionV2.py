@@ -18,6 +18,7 @@ import sys
 import cv2
 import pymupdf
 import pandas as pd
+import csv
 import os
 from doctr.models import ocr_predictor
 from doctr.io import DocumentFile
@@ -131,7 +132,7 @@ def plot_clusters(centers,pred,points,pdf_name):
         plt.scatter(center[0], center[1], marker='^', c='red')
 
     print(pdf_name + " was clustered " + str(len(centers)))
-    plt.savefig("test/clusters/{name}.png".format(name = pdf_name))
+    plt.savefig("diagrams/clusters/{name}.png".format(name = pdf_name))
     plt.close()
 
 
@@ -303,10 +304,9 @@ def optical_character_recognition(png_filepath,predictor):
         
     return image, data_points
 
-def normalize_points(image, data_points, scaling_factor):
+def normalize_points(image,data_points, scaling_factor):
     scaled_points = [(x / scaling_factor, y / scaling_factor) for (x,y) in data_points]
-    return image, scaled_points
-
+    return scaled_points
 
 def normalize_points_by_resolution(image, data_points):
     # 1 / average dimension * 1000 to bring data roughly into [0,1000]
@@ -330,32 +330,34 @@ def normalize_points_by_font_size(lines, page_dimensions, image, data_points):
         print(f'fell back to average: f{font_size:.2f}')
         
     # scale font size to 12pt
-    return normalize_points(image, data_points, 12 / font_size)
+    return normalize_points(image,data_points, 12 / font_size)
 
 
 if __name__ == '__main__':
     debug = True
     allow_old_contour_fallback = True
-    directory = 'test/raw'
+    directory = 'diagrams/raw'
     predictor = ocr_predictor(pretrained=True)
+    csv_file = open("DataNoVoronoi.csv", 'w', newline='')
     for filename in os.listdir(directory):
         file = os.path.join(directory, filename)
         if not os.path.isfile(file):
             continue
-        png_filepath = pdf_2_image(file, 'test/png')
+        png_filepath = pdf_2_image(file, 'diagrams/png')
         if png_filepath is None:
             continue
         stem = os.path.splitext(os.path.basename(filename))[0]
         if debug:
-            data = find_contour(png_filepath, stem, predictor, 'test', allow_old_contour_fallback)
+            data = find_contour(png_filepath, stem, predictor, 'diagrams', allow_old_contour_fallback)
             X, Y = get_bounding_box(file)
             bounding_box = [0, X, 0, Y]
-            data = np.array(data)
-            centroids = plot(data, bounding_box)
-            plt.savefig("test/voronoi/{name}.png".format(name=filename))
+            #centroids = plot(np.array(data), bounding_box)
+            plt.savefig("diagrams/voronoi/{name}".format(name=filename))
             plt.close()
-            print("Stand dev " + str(np.std(centroids)))
-            print("Average " + str(np.mean(centroids)))
+            csv_file.write(f'{filename},{str(np.mean(data))},{str(np.std(data))}')
+            csv_file.write('\n')
+            #print("Stand dev " + str(np.std(centroids)))
+            #print("Average " + str(np.mean(centroids)))
         else:
             dis, stand_dev, average = find_tessellation(png_filepath, stem, predictor, allow_old_contour_fallback, 'test')
             print(dis, stand_dev, average)
