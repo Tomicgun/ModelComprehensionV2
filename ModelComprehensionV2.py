@@ -12,116 +12,224 @@
 import numpy as np
 from sklearn.cluster import MeanShift
 from scipy.spatial import Voronoi
-from scipy.stats import gaussian_kde
-from scipy.signal import find_peaks
-import sys
 import cv2
 import pymupdf
 import pandas as pd
-import os
-from doctr.models import ocr_predictor
-from doctr.io import DocumentFile
+
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
-def pdf_2_image(filepath, outdir):
-    try:
-        with pymupdf.open(filepath) as pdf:
-            png_filename = os.path.splitext(os.path.basename(filepath))[0] + '.png'
-            png_filepath = os.path.join(outdir, png_filename)
-            pdf.load_page(0).get_pixmap(dpi=300).save(png_filepath)
-            return png_filepath
-    except:
-        print(f'failed to convert {filepath} to image')
-        return None
+from doctr.models import ocr_predictor
+from doctr.models.predictor import OCRPredictor
+from doctr.io import DocumentFile
 
-def get_bounding_box(filepath):
-    try:
-        with pymupdf.open(filepath) as pdf:
-            #assumes a dpi of 300
-            return pdf.load_page(0).mediabox_size.x * 300 / 72, pdf.load_page(0).mediabox_size.y * 300 / 72
-    except:
-        print(f'failed to load {filepath} to image')
-        return None
+import os
+import sys
+
+from typing import List, Tuple
+from dataclasses import dataclass
+from enum import Enum
 
 
-def distance(points):
-    distances = []
-    for point1 in points:
-        for point2 in points:
-            if point1[0] != point2[0] or point1[1] != point2[1]:
-                distances.append(np.linalg.norm(np.subtract(point1, point2)))
-    return distances
+class PoiVersion(Enum):
+    OCR = 1
+    OPENCV = 2
+    ROLLBACK = 3
 
-#median is 25 IQR is 23 for the new contour method
-# Any text value, on line 55, less than 10 should be put through the old method
-# Then check the count and if it is still less than 10, return message to user
-# that image could not be processed, and ask the user to improve the image quality
-# Any text value above X (Probably a 100) should probably be clustered (if deemed necessary)
+class ClusteringCriteria(Enum):
+    ALWAYS = 1
+    NEVER = 2
+    THRESHOLD = 3
 
-def find_contour(png_filepath, pdf_name, ocr_reader, root_dir, allow_fallback=True):
-    ocr_result = optical_character_recognition(png_filepath, ocr_reader)
-    if ocr_result is None:
-        return
-    image, data = ocr_result
+@dataclass
+class Configuration:
+    poi_version: PoiVersion
+    rollback_threshold: int
+    use_clustering: ClusteringCriteria
+    clustering_threshold: int
+    use_voronoi: bool
+    output_intermediate_diagrams: bool
+    input_dir: str
+    output_dir: str
 
-    if allow_fallback and len(data) <= 6:
-        opencv_image, opencv_data = pure_open_cv_method(png_filepath)
-        if len(data) < len(opencv_data):
-            data = opencv_data
-            image = opencv_image
-            print(f'old method better for {pdf_name}')
-            
-    cv2.imwrite(f'{root_dir}/contours/{pdf_name}.png', image)
-    print(f'{pdf_name} done; {len(data)} points found')
+PointList = List[Tuple[int, int]]
+@dataclass
+class DiagramData:
+    width: int
+    height: int
+    pois: PointList
 
-    if(len(data) > 100):
-        cluster_points(data,pdf_name)
+def run_all(config: Configuration) -> pd.DataFrame:
+    
+    if not os.path.isdir(config.input_dir):
+        raise FileNotFoundError(f'{config.input_dir} does not exist, or is not a directory')
+    if not os.path.isdir(config.output_dir):
+        raise FileNotFoundError(f'{config.output_dir} does not exist, or is not a directory')
+
+    ocr_reader = None
+    if config.poi_version != PoiVersion.OPENCV:
+        ocr_reader = ocr_predictor(pretrained=True)
+    
+    png_directory = ensure_subdirectory(config.output_dir, 'png')
+    poi_directory = ensure_subdirectory(config.output_dir, 'poi')
+    if config.use_clustering != ClusteringCriteria.NEVER:
+        cluster_directory = ensure_subdirectory(config.output_dir, 'cluster')
+    if config.use_voronoi:
+        voronoi_directory = ensure_subdirectory(config.output_dir, 'voronoi')
+
+    files = [f for f in os.listdir(config.input_dir) if os.path.isfile(os.path.join(config.input_dir, f))]
+
+    distance_distributions: List[Tuple[str, float, float]] = []
+
+    for i, filename in enumerate(files):
         
-    return data
+        # convert pdf to png
+        diagram_name = os.path.splitext(os.path.basename(filename))[0] + '.png'
+        image_path = os.path.join(png_directory, diagram_name)
+        if not pdf_2_image(os.path.join(config.input_dir, filename), image_path):
+            print(f'failed to convert {diagram_name} to image')
+            continue
 
-def find_tessellation(png_filepath, pdf_name, ocr_predictor, allow_fallback, root_dir):
-    # df = pd.read_csv('Name to Nodes.csv')
-    # df.columns = ['Name','Nodes']
-    # df = df[df['Name'] == pdf_name]
-    # if df.shape[0] == 0:
-    #     print('PDF not in table')
-    #     return 0,0,0
-    # K = df.values.flatten().tolist()[1]
-    tesselation = find_contour(png_filepath,pdf_name,ocr_predictor, root_dir, allow_fallback)
-    if len(tesselation) == 0:
-        print('No center points found')
-        return 0,0,0
-    X, Y = np.hsplit(tesselation,2)
-    bounding_box = [0.,int(np.max(X)+200), 0., int(np.max(Y)+200)]
-    # do the tesselation thingy
-    centroids = plot(tesselation,bounding_box)
-    if len(centroids) == 1:
-        dis = 0
-        stan_dev = 0
-        average = 0
-        print('Voronoi Tesselation with only one center point')
-    elif len(centroids) == 0:
-        dis = 0
-        stan_dev = 0
-        average = 0
-        print('Voronoi not calculated')
+        # find initial points of interest
+        diagram_data = find_points_of_interest(image_path, ocr_reader, config, os.path.join(poi_directory, diagram_name))
+
+        # cluster if appropriate
+        if config.use_clustering == ClusteringCriteria.ALWAYS or config.use_clustering == ClusteringCriteria.THRESHOLD and len(diagram_data.pois) > config.clustering_threshold:
+            diagram_data = cluster_points(diagram_data, image_path, config.output_intermediate_diagrams, os.path.join(cluster_directory, diagram_name))
+
+        # voronoi
+        if config.use_voronoi:
+            diagram_data = find_voronoi_centroids(diagram_data, config.output_intermediate_diagrams, os.path.join(voronoi_directory, diagram_name))
+
+        distances = find_distances(diagram_data.pois)
+        distance_distributions.append((filename, np.mean(distances, axis=0), np.std(distances, axis=0)))
+        print(f'finished {diagram_name} [{i + 1}/{len(files)}]')
+    
+    df = pd.DataFrame(distance_distributions, columns=['diagram', 'average', 'stddev'])
+    df.to_csv(os.path.join(config.output_dir, 'output.csv'), index=False)
+
+        
+def ensure_subdirectory(output_root: str, subdirectory: str) -> str:
+    subdirectory_path = os.path.join(output_root, subdirectory)
+    if not os.path.exists(subdirectory_path):
+        os.mkdir(subdirectory_path)
+    return subdirectory_path
+
+
+def pdf_2_image(filepath: str, outpath: str) -> bool:
+    try:
+        with pymupdf.open(filepath) as pdf:
+            pdf.load_page(0).get_pixmap(dpi=300).save(outpath)
+            return True
+    except:
+        return False
+
+
+def find_points_of_interest(image_path: str, ocr_reader: OCRPredictor | None, config: Configuration, output_filepath: str) -> DiagramData:
+    if config.poi_version != PoiVersion.OPENCV:
+        image, points = poi_ocr(image_path, ocr_reader, config.output_intermediate_diagrams)
+
+        if config.poi_version == PoiVersion.ROLLBACK and len(points) <= config.rollback_threshold:
+            cv_image, cv_points = poi_pure_opencv(image_path)
+            if len(cv_points) > len(points):
+                image, points = cv_image, cv_points
+
     else:
-        dis = distance(centroids)
-        stan_dev = np.std(dis, axis=0)
-        average = np.average(dis, axis=0)
-    plt.savefig(f'{root_dir}/voronoi/{pdf_name}.png')
-    plt.close()
-    return dis, stan_dev, average
+        image, points = poi_pure_opencv(image_path)
+    
+    if config.output_intermediate_diagrams:
+        cv2.imwrite(output_filepath, image)
+
+    return DiagramData(pois=points, width=image.shape[0], height=image.shape[1])
+    
+
+def poi_ocr(image_path: str, ocr_reader: OCRPredictor, generate_intermiate_diagram: bool) -> Tuple[cv2.typing.MatLike | None, PointList]:
+    page = ocr_reader(DocumentFile.from_images(image_path)).pages[0]
+
+    lines = [line for block in page.blocks for line in block.lines]
+
+    text_centers = [
+        (round((line.geometry[0][0] + line.geometry[1][0]) / 2 * page.dimensions[1]),
+         round((line.geometry[0][1] + line.geometry[1][1]) / 2 * page.dimensions[0]))
+        for line in lines
+    ]
+
+    image = None
+    if generate_intermiate_diagram:
+        image = cv2.imread(image_path)
+        for c in text_centers:
+            cv2.circle(image, c, 10, (0, 0, 255), 5)
+
+    return image, text_centers
 
 
-def cluster_points(points,pdf_name):
+def poi_pure_opencv(image_path: str) -> Tuple[cv2.typing.MatLike, PointList]:
+    image = cv2.imread(image_path)
+
+    # This method was taken from this stack exchange page https://stackoverflow.com/questions/37771263/detect-text-area-in-an-image-using-python-and-opencv
+    # OP username is nathancy
+    # Do old Method
+    data_points = []
+
+    # Load image, grayscale, Gaussian blur, adaptive threshold
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    # using slightly less blurr
+    blur = cv2.GaussianBlur(gray, (9, 9), 0)
+
+    # block size control how large the regions are, c is a constant that is subtracted from mean, and infulences how many points are foind at the end
+    # for block size 9 or 11 are good, for c 30 is the sweet spot more or less simply degrades results.
+    thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 9, 30)
+
+    # Dilate to combine adjacent text contours
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
+    dilate = cv2.dilate(thresh, kernel, iterations=4)
+
+    # Find contours, highlight text areas, and extract ROIs
+    contours = cv2.findContours(dilate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # if it finds only 2 contours keep the head, if not remvoe the head contour
+    contours = contours[0] if len(contours) == 2 else contours[1]
+
+    # Do the drawing and saving of points
+    for c in contours:
+        area = cv2.contourArea(c)
+        if area > 1000:
+            x, y, w, h = cv2.boundingRect(c)
+            cv2.rectangle(image, (x, y), (x + w, y + h), (36, 255, 12), 3)
+            cv2.circle(image, (x + w // 2, y + h // 2), 10, (255, 0, 0), 2)
+            data_points.append((x, y))
+
+    return image, data_points
+
+
+colors = [
+    (255, 128, 128),
+    (255, 191, 128),
+    (255, 255, 128),
+    (191, 255, 128),
+    (128, 255, 128),
+    (128, 255, 191),
+    (128, 255, 255),
+    (128, 191, 255),
+    (128, 128, 255),
+    (191, 128, 255),
+]
+def cluster_points(diagram_data: DiagramData, image_path: str, generate_intermediate_diagram: bool, output_filepath: str) -> DiagramData:
     mean_shift = MeanShift(bandwidth=100,n_jobs=4)
-    mean_shift.fit(points)
+    mean_shift.fit(diagram_data.pois)
     centers = mean_shift.cluster_centers_
-    pred = mean_shift.predict(points)
-    plot_clusters(centers,pred,points,pdf_name)
 
-def plot_clusters(centers,pred,points,pdf_name):
+    if generate_intermediate_diagram:
+        pred = mean_shift.predict(diagram_data.pois)
+        plot_clusters(centers, pred, diagram_data.pois, output_filepath)
+
+    diagram_data.pois = [(int(center[0]), int(center[1])) for center in centers]
+    return diagram_data
+
+
+def plot_clusters(centers: np.ndarray, pred: np.ndarray, points: PointList, output_filepath: str):
     plt.figure(figsize=(12, 5))
     plt.subplot(1, 2, 1)
     plt.scatter(*zip(*points), c=pred)
@@ -130,22 +238,34 @@ def plot_clusters(centers,pred,points,pdf_name):
         center = center[:2]
         plt.scatter(center[0], center[1], marker='^', c='red')
 
-    print(pdf_name + " was clustered " + str(len(centers)))
-    plt.savefig("test/clusters/{name}.png".format(name = pdf_name))
+    plt.savefig(output_filepath)
     plt.close()
 
 
-def in_box(robots, bounding_box):
-    return np.logical_and(np.logical_and(bounding_box[0] <= robots[:, 0],
-                                         robots[:, 0] <= bounding_box[1]),
-                          np.logical_and(bounding_box[2] <= robots[:, 1],
-                                         robots[:, 1] <= bounding_box[3]))
+def find_voronoi_centroids(diagram_data: DiagramData, generate_intermediate_diagram: bool, output_filepath: str) -> DiagramData:
+    # Adapted from Cosmic from stack overflow question with link at top of this artifact
+    vor = voronoi(np.array(diagram_data.pois), [0, diagram_data.width, 0, diagram_data.height])
 
-def voronoi(robots, bounding_box):
+    centroids = []
+    pois = []
+    for region in vor.filtered_regions:
+        vertices = vor.vertices[region + [region[0]], :]
+        centroid = centroid_region(vertices)
+        centroids.append(centroid)
+        pois.append(list(centroid[0, :]))
+    diagram_data.pois = pois
+
+    if (generate_intermediate_diagram):
+        diagram_data.intermediate_diagram = plot_voronoi(vor, centroids, output_filepath)
+
+    return diagram_data
+
+
+def voronoi(pois: np.ndarray, bounding_box: List[int]) -> Voronoi:
     #Author Cosmic from stack overflow question with link at top of this artifact
     eps = sys.float_info.epsilon
-    i = in_box(robots, bounding_box)
-    points_center = robots[i, :]
+    i = in_box(pois, bounding_box)
+    points_center = pois[i, :]
     points_left = np.copy(points_center)
     points_left[:, 0] = bounding_box[0] - (points_left[:, 0] - bounding_box[0])
     points_right = np.copy(points_center)
@@ -197,6 +317,14 @@ def voronoi(robots, bounding_box):
     vor.filtered_regions = regions
     return vor
 
+
+def in_box(pois: np.ndarray, bounding_box: List[int]):
+    return np.logical_and(np.logical_and(bounding_box[0] <= pois[:, 0],
+                                         pois[:, 0] <= bounding_box[1]),
+                          np.logical_and(bounding_box[2] <= pois[:, 1],
+                                         pois[:, 1] <= bounding_box[3]))
+
+
 def centroid_region(vertices):
     # Author Cosmic from stack overflow question with link at top of this artifact
     A = 0
@@ -214,148 +342,33 @@ def centroid_region(vertices):
     C_y = (1.0 / (6.0 * A)) * C_y
     return np.array([[C_x, C_y]])
 
-def plot(r,bounding_box):
-    # Author Cosmic from stack overflow question with link at top of this artifact
 
-    vor = voronoi(r, bounding_box)
+def plot_voronoi(vor: Voronoi, centroids: np.ndarray, output_filepath: str) -> None:
 
     fig = plt.figure()
     ax = fig.gca()
-    if vor.filtered_points.shape[0] == 0:
-        return np.empty((0,1))
-# Plot initial points
     ax.plot(vor.filtered_points[:, 0], vor.filtered_points[:, 1], 'b.')
-    #print("initial",vor.filtered_points)
-# Plot ridges points
     for region in vor.filtered_regions:
         vertices = vor.vertices[region, :]
-        ax.plot(vertices[:, 0], vertices[:, 1], 'go')
-# Plot ridges
-    for region in vor.filtered_regions:
-        vertices = vor.vertices[region + [region[0]], :]
         ax.plot(vertices[:, 0], vertices[:, 1], 'k-')
-# Compute and plot centroids
-    centroids = []
-    for region in vor.filtered_regions:
-        vertices = vor.vertices[region + [region[0]], :]
-        centroid = centroid_region(vertices)
-        centroids.append(list(centroid[0, :]))
+
+    for centroid in centroids:
         ax.plot(centroid[:, 0], centroid[:, 1], 'r.')
-    centroids = np.asarray(centroids)
-    return centroids
 
-def pure_open_cv_method(png_filepath):
-    image = cv2.imread(png_filepath)
-
-    # This method was taken from this stack exchange page https://stackoverflow.com/questions/37771263/detect-text-area-in-an-image-using-python-and-opencv
-    # OP username is nathancy
-    # Do old Method
-    data_points = []
-
-    # Load image, grayscale, Gaussian blur, adaptive threshold
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    # using slightly less blurr
-    blur = cv2.GaussianBlur(gray, (9, 9), 0)
-
-    # block size control how large the regions are, c is a constant that is subtracted from mean, and infulences how many points are foind at the end
-    # for block size 9 or 11 are good, for c 30 is the sweet spot more or less simply degrades results.
-    thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 9, 30)
-
-    # Dilate to combine adjacent text contours
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (21, 21))
-    dilate = cv2.dilate(thresh, kernel, iterations=4)
-
-    # Find contours, highlight text areas, and extract ROIs
-    contours = cv2.findContours(dilate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # if it finds only 2 contours keep the head, if not remvoe the head contour
-    contours = contours[0] if len(contours) == 2 else contours[1]
-
-    # Do the drawing and saving of points
-    for c in contours:
-        area = cv2.contourArea(c)
-        if area > 1000:
-            x, y, w, h = cv2.boundingRect(c)
-            cv2.rectangle(image, (x, y), (x + w, y + h), (36, 255, 12), 3)
-            cv2.circle(image, (x + w // 2, y + h // 2), 10, (255, 0, 0), 2)
-            data_points.append((x, y))
-
-    return image, data_points
-
-def optical_character_recognition(png_filepath,predictor):
-    image = cv2.imread(png_filepath)
-
-    result = predictor(DocumentFile.from_images(png_filepath))
-
-    lines = [line for block in result.pages[0].blocks for line in block.lines]
-    dims = result.pages[0].dimensions
-
-
-    data_points = [
-        (int(round((line.geometry[0][0] + line.geometry[1][0]) / 2 * dims[1])),
-         int(round((line.geometry[0][1] + line.geometry[1][1]) / 2 * dims[0])))
-        for line in lines
-    ]
-
-    for c in data_points:
-        cv2.circle(image, c, 10, (0, 0, 255), 5)
-        
-    return image, data_points
-
-def normalize_points(image, data_points, scaling_factor):
-    scaled_points = [(x / scaling_factor, y / scaling_factor) for (x,y) in data_points]
-    return image, scaled_points
-
-
-def normalize_points_by_resolution(image, data_points):
-    # 1 / average dimension * 1000 to bring data roughly into [0,1000]
-    scaling_factor = 2000 / (image.shape[0] + image.shape[2])
-    return normalize_points(image, data_points, scaling_factor)
+    fig.savefig(output_filepath)
+    plt.close(fig)
     
-def normalize_points_by_font_size(lines, page_dimensions, image, data_points):
-    heights = np.array([(line.geometry[1][1] - line.geometry[0][1]) * page_dimensions[0] for line in lines])
 
-    # use kernel density estimation to find the mode (most common) font size
-    kde = gaussian_kde(heights, bw_method=0.3)
-    x_grid = np.linspace(min(heights) - 1, max(heights) + 1, 1000)
-    kde_values = kde(x_grid)
-    peaks, _ = find_peaks(kde_values)
-    if len(peaks) > 0:
-        font_size = x_grid[peaks[np.argmax(kde_values[peaks])]]
-        print(f'estimated mode {font_size:.2f}')
-    else:
-        # fall back to average
-        font_size = np.mean(heights)
-        print(f'fell back to average: f{font_size:.2f}')
-        
-    # scale font size to 12pt
-    return normalize_points(image, data_points, 12 / font_size)
+def find_distances(points: PointList) -> List[float]:
+    distances = []
+    for point1 in points:
+        for point2 in points:
+            if (point1[0] == point2[0] and point1[1] == point2[1]):
+                continue
+            distances.append(np.linalg.norm(np.subtract(point1, point2)))
+    return distances
 
 
 if __name__ == '__main__':
-    debug = True
-    allow_old_contour_fallback = True
-    directory = 'test/raw'
-    predictor = ocr_predictor(pretrained=True)
-    for filename in os.listdir(directory):
-        file = os.path.join(directory, filename)
-        if not os.path.isfile(file):
-            continue
-        png_filepath = pdf_2_image(file, 'test/png')
-        if png_filepath is None:
-            continue
-        stem = os.path.splitext(os.path.basename(filename))[0]
-        if debug:
-            data = find_contour(png_filepath, stem, predictor, 'test', allow_old_contour_fallback)
-            X, Y = get_bounding_box(file)
-            bounding_box = [0, X, 0, Y]
-            data = np.array(data)
-            centroids = plot(data, bounding_box)
-            plt.savefig("test/voronoi/{name}.png".format(name=filename))
-            plt.close()
-            print("Stand dev " + str(np.std(centroids)))
-            print("Average " + str(np.mean(centroids)))
-        else:
-            dis, stand_dev, average = find_tessellation(png_filepath, stem, predictor, allow_old_contour_fallback, 'test')
-            print(dis, stand_dev, average)
+    config = Configuration(poi_version=PoiVersion.ROLLBACK, rollback_threshold=6, use_clustering=ClusteringCriteria.THRESHOLD, clustering_threshold=100, use_voronoi=True, output_intermediate_diagrams=True, input_dir='test/raw', output_dir='test')
+    output = run_all(config)
