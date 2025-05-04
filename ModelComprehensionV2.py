@@ -60,7 +60,7 @@ class DiagramData:
     height: int
     pois: PointList
 
-def run_all(config: Configuration) -> pd.DataFrame:
+def run_all(config: Configuration) -> None:
     
     if not os.path.isdir(config.input_dir):
         raise FileNotFoundError(f'{config.input_dir} does not exist, or is not a directory')
@@ -371,4 +371,4 @@ def find_distances(points: PointList) -> List[float]:
 
 if __name__ == '__main__':
     config = Configuration(poi_version=PoiVersion.ROLLBACK, rollback_threshold=6, use_clustering=ClusteringCriteria.THRESHOLD, clustering_threshold=100, use_voronoi=True, output_intermediate_diagrams=True, input_dir='test/raw', output_dir='test')
-    output = run_all(config)
+    run_all(config)
