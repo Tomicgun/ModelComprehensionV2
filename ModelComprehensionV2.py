@@ -116,7 +116,7 @@ def configuration_creator(yaml_file_path, output_directory_file_path, input_dire
 
 
 def run_all(config: Configuration) -> None:
-    
+
     if not os.path.isdir(config.input_dir):
         raise FileNotFoundError(f'{config.input_dir} does not exist, or is not a directory')
     if not os.path.isdir(config.output_dir):
@@ -125,7 +125,7 @@ def run_all(config: Configuration) -> None:
     ocr_reader = None
     if config.poi_version != PoiVersion.OPENCV:
         ocr_reader = ocr_predictor(pretrained=True)
-    
+
     png_directory = ensure_subdirectory(config.output_dir, 'png')
     poi_directory = ensure_subdirectory(config.output_dir, 'poi')
     cluster_directory = ensure_subdirectory(config.output_dir, 'cluster')
@@ -138,7 +138,7 @@ def run_all(config: Configuration) -> None:
     distance_distributions: List[Tuple[str, float, float]] = []
 
     for i, filename in enumerate(files):
-        
+
         # convert pdf to png
         diagram_name = os.path.splitext(os.path.basename(filename))[0] + '.png'
         image_path = os.path.join(png_directory, diagram_name)
@@ -151,7 +151,7 @@ def run_all(config: Configuration) -> None:
 
         # cluster if appropriate
         if config.use_clustering == ClusteringCriteria.ALWAYS or config.use_clustering == ClusteringCriteria.THRESHOLD and len(diagram_data.pois) > config.clustering_threshold:
-            diagram_data = cluster_points(diagram_data, image_path, config.output_intermediate_diagrams, os.path.join(cluster_directory, diagram_name))
+            diagram_data = cluster_points(diagram_data, config.output_intermediate_diagrams, os.path.join(cluster_directory, diagram_name))
 
         # voronoi
         if config.use_voronoi:
@@ -160,11 +160,11 @@ def run_all(config: Configuration) -> None:
         distances = find_distances(diagram_data.pois)
         distance_distributions.append((filename, np.mean(distances, axis=0), np.std(distances, axis=0)))
         print(f'finished {diagram_name} [{i + 1}/{len(files)}]')
-    
+
     df = pd.DataFrame(distance_distributions, columns=['diagram', 'average', 'stddev'])
     df.to_csv(os.path.join(config.output_dir, 'output.csv'), index=False)
 
-        
+
 def ensure_subdirectory(output_root: str, subdirectory: str) -> str:
     subdirectory_path = os.path.join(output_root, subdirectory)
     if not os.path.exists(subdirectory_path):
@@ -192,14 +192,14 @@ def find_points_of_interest(image_path: str, ocr_reader: OCRPredictor | None, co
 
     else:
         image, points = poi_pure_opencv(image_path)
-    
+
     if config.output_intermediate_diagrams:
         cv2.imwrite(output_filepath, image)
 
     return DiagramData(pois=points, width=image.shape[0], height=image.shape[1])
-    
 
-def poi_ocr(image_path: str, ocr_reader: OCRPredictor, generate_intermiate_diagram: bool) -> Tuple[cv2.typing.MatLike | None, PointList]:
+
+def poi_ocr(image_path: str, ocr_reader: OCRPredictor, generate_intermediate_diagram: bool) -> Tuple[cv2.typing.MatLike | None, PointList]:
     page = ocr_reader(DocumentFile.from_images(image_path)).pages[0]
 
     lines = [line for block in page.blocks for line in block.lines]
@@ -211,7 +211,7 @@ def poi_ocr(image_path: str, ocr_reader: OCRPredictor, generate_intermiate_diagr
     ]
 
     image = None
-    if generate_intermiate_diagram:
+    if generate_intermediate_diagram:
         image = cv2.imread(image_path)
         for c in text_centers:
             cv2.circle(image, c, 10, (0, 0, 255), 5)
@@ -233,7 +233,7 @@ def poi_pure_opencv(image_path: str) -> Tuple[cv2.typing.MatLike, PointList]:
     # using slightly less blurr
     blur = cv2.GaussianBlur(gray, (9, 9), 0)
 
-    # block size control how large the regions are, c is a constant that is subtracted from mean, and infulences how many points are foind at the end
+    # block size control how large the regions are, c is a constant that is subtracted from mean, and influences how many points are found at the end
     # for block size 9 or 11 are good, for c 30 is the sweet spot more or less simply degrades results.
     thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 9, 30)
 
@@ -244,7 +244,7 @@ def poi_pure_opencv(image_path: str) -> Tuple[cv2.typing.MatLike, PointList]:
     # Find contours, highlight text areas, and extract ROIs
     contours = cv2.findContours(dilate, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    # if it finds only 2 contours keep the head, if not remvoe the head contour
+    # if it finds only 2 contours keep the head, if not remove the head contour
     contours = contours[0] if len(contours) == 2 else contours[1]
 
     # Do the drawing and saving of points
@@ -259,19 +259,7 @@ def poi_pure_opencv(image_path: str) -> Tuple[cv2.typing.MatLike, PointList]:
     return image, data_points
 
 
-colors = [
-    (255, 128, 128),
-    (255, 191, 128),
-    (255, 255, 128),
-    (191, 255, 128),
-    (128, 255, 128),
-    (128, 255, 191),
-    (128, 255, 255),
-    (128, 191, 255),
-    (128, 128, 255),
-    (191, 128, 255),
-]
-def cluster_points(diagram_data: DiagramData, image_path: str, generate_intermediate_diagram: bool, output_filepath: str) -> DiagramData:
+def cluster_points(diagram_data: DiagramData, generate_intermediate_diagram: bool, output_filepath: str) -> DiagramData:
     mean_shift = MeanShift(bandwidth=100,n_jobs=4)
     mean_shift.fit(diagram_data.pois)
     centers = mean_shift.cluster_centers_
@@ -299,25 +287,29 @@ def plot_clusters(centers: np.ndarray, pred: np.ndarray, points: PointList, outp
 
 def find_voronoi_centroids(diagram_data: DiagramData, generate_intermediate_diagram: bool, output_filepath: str) -> DiagramData:
     # Adapted from Cosmic from stack overflow question with link at top of this artifact
-    vor = voronoi(np.array(diagram_data.pois), [0, diagram_data.width, 0, diagram_data.height])
+    vor, filtered_points, regions = voronoi(np.array(diagram_data.pois), [0, diagram_data.height, 0, diagram_data.width])
+    if filtered_points.shape[0] == 0:
+        diagram_data.pois = []
+        return diagram_data
 
     centroids = []
     pois = []
-    for region in vor.filtered_regions:
+    for region in regions:
         vertices = vor.vertices[region + [region[0]], :]
         centroid = centroid_region(vertices)
         centroids.append(centroid)
-        pois.append(list(centroid[0, :]))
+        pois.append((int(centroid[0, 0]), int(centroid[0, 1])))
     diagram_data.pois = pois
 
-    if (generate_intermediate_diagram):
-        diagram_data.intermediate_diagram = plot_voronoi(vor, np.array(centroids), output_filepath)
+    if generate_intermediate_diagram:
+        plot_voronoi(vor, np.asarray(centroids), filtered_points, regions, output_filepath)
 
     return diagram_data
 
 
-def voronoi(pois: np.ndarray, bounding_box: List[int]) -> Voronoi:
+def voronoi(pois: np.ndarray, bounding_box: List[int]) -> Tuple[Voronoi, np.ndarray, List[List[int]]]:
     #Author Cosmic from stack overflow question with link at top of this artifact
+
     eps = sys.float_info.epsilon
     i = in_box(pois, bounding_box)
     points_center = pois[i, :]
@@ -344,8 +336,6 @@ def voronoi(pois: np.ndarray, bounding_box: List[int]) -> Voronoi:
     # Filter regions and select corresponding points
     regions = []
     points_to_filter = []  # we'll need to gather points too
-    ind = np.arange(points.shape[0])
-    ind = np.expand_dims(ind, axis=1)
 
     for i, region in enumerate(vor.regions):  # enumerate the regions
         if not region:  # nicer to skip the empty region altogether
@@ -359,8 +349,8 @@ def voronoi(pois: np.ndarray, bounding_box: List[int]) -> Voronoi:
             else:
                 x = vor.vertices[index, 0]
                 y = vor.vertices[index, 1]
-                if not (bounding_box[0] - eps <= x and x <= bounding_box[1] + eps and
-                        bounding_box[2] - eps <= y and y <= bounding_box[3] + eps):
+                if not (bounding_box[0] - eps <= x <= bounding_box[1] + eps and
+                        bounding_box[2] - eps <= y <= bounding_box[3] + eps):
                     flag = False
                     break
         if flag:
@@ -368,9 +358,7 @@ def voronoi(pois: np.ndarray, bounding_box: List[int]) -> Voronoi:
 
             # find the point which lies inside
             points_to_filter.append(vor.points[vor.point_region == i][0, :])
-    vor.filtered_points = np.array(points_to_filter)
-    vor.filtered_regions = regions
-    return vor
+    return vor, np.array(points_to_filter), regions
 
 
 def in_box(pois: np.ndarray, bounding_box: List[int]):
@@ -398,12 +386,12 @@ def centroid_region(vertices):
     return np.array([[C_x, C_y]])
 
 
-def plot_voronoi(vor: Voronoi, centroids: np.ndarray, output_filepath: str) -> None:
+def plot_voronoi(vor: Voronoi, centroids: np.ndarray, filtered_points: np.ndarray, regions: List[List[int]], output_filepath: str) -> None:
 
     fig = plt.figure()
     ax = fig.gca()
-    ax.plot(vor.filtered_points[:, 0], vor.filtered_points[:, 1], 'b.')
-    for region in vor.filtered_regions:
+    ax.plot(filtered_points[:, 0], filtered_points[:, 1], 'b.')
+    for region in regions:
         vertices = vor.vertices[region, :]
         ax.plot(vertices[:, 0], vertices[:, 1], 'k-')
 
@@ -412,13 +400,13 @@ def plot_voronoi(vor: Voronoi, centroids: np.ndarray, output_filepath: str) -> N
 
     fig.savefig(output_filepath)
     plt.close(fig)
-    
+
 
 def find_distances(points: PointList) -> List[float]:
     distances = []
     for point1 in points:
         for point2 in points:
-            if (point1[0] == point2[0] and point1[1] == point2[1]):
+            if point1[0] == point2[0] and point1[1] == point2[1]:
                 continue
             distances.append(np.linalg.norm(np.subtract(point1, point2)))
     return distances
