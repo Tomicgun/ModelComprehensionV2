@@ -63,6 +63,20 @@ class DiagramData:
     pois: PointList
 
 
+    """
+    :description: This method takes in a config file path, output directory path, and input directory path. 
+    This method then enter all the config data into to Configuration class. 
+    Then return this class for later use in the program.
+    
+    :param yaml_file_path:
+    :type yaml_file_path: str 
+    :param output_directory_file_path:
+    :type output_directory_file_path: str
+    :param input_directory_file_path:
+    :type input_directory_file_path: str
+    :return: Configuration
+    :rtype: Class Configuration
+    """
 def configuration_creator(yaml_file_path, output_directory_file_path, input_directory_file_path):
     configuration = None
     try:
