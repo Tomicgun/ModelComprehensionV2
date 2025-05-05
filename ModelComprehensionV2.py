@@ -10,6 +10,7 @@
 
 
 import numpy as np
+
 from sklearn.cluster import MeanShift
 from scipy.spatial import Voronoi
 import cv2
@@ -30,7 +31,8 @@ import sys
 from typing import List, Tuple
 from dataclasses import dataclass
 from enum import Enum
-
+from yaml import safe_load, YAMLError
+from argparse import ArgumentParser
 
 class PoiVersion(Enum):
     OCR = 1
@@ -60,6 +62,45 @@ class DiagramData:
     height: int
     pois: PointList
 
+
+def configuration_creator(yaml_file_path, output_directory_file_path, input_directory_file_path):
+    configuration = None
+    try:
+        with open(yaml_file_path, 'r') as config_file:
+            config = safe_load(config_file)
+            poi_version = PoiVersion(config['poi_version'])
+            use_clustering = ClusteringCriteria(config['use_clustering'])
+            configuration = Configuration(
+                poi_version=poi_version,
+                rollback_threshold=config['rollback_threshold'],
+                clustering_threshold=config['clustering_threshold'],
+                use_clustering=use_clustering,
+                use_voronoi=config['use_voronoi'],
+                output_intermediate_diagrams=config['output_intermediate_diagrams'],
+                input_dir=input_directory_file_path,
+                output_dir=output_directory_file_path
+                )
+    except FileNotFoundError:
+        poi_version = PoiVersion(PoiVersion.ROLLBACK)
+        use_clustering = ClusteringCriteria(ClusteringCriteria.THRESHOLD)
+        configuration = Configuration(
+            poi_version=poi_version,
+            rollback_threshold=6,
+            clustering_threshold=100,
+            use_clustering=use_clustering,
+            use_voronoi=True,
+            output_intermediate_diagrams=True,
+            input_dir=input_directory_file_path,
+            output_dir=output_directory_file_path
+        )
+    except YAMLError as exc:
+        print(f"Error parsing YAML file: {exc}")
+        return None
+
+
+    return configuration
+
+
 def run_all(config: Configuration) -> None:
     
     if not os.path.isdir(config.input_dir):
@@ -73,10 +114,10 @@ def run_all(config: Configuration) -> None:
     
     png_directory = ensure_subdirectory(config.output_dir, 'png')
     poi_directory = ensure_subdirectory(config.output_dir, 'poi')
-    if config.use_clustering != ClusteringCriteria.NEVER:
-        cluster_directory = ensure_subdirectory(config.output_dir, 'cluster')
-    if config.use_voronoi:
-        voronoi_directory = ensure_subdirectory(config.output_dir, 'voronoi')
+    cluster_directory = ensure_subdirectory(config.output_dir, 'cluster')
+    voronoi_directory = ensure_subdirectory(config.output_dir, 'voronoi')
+    #if config.use_clustering != ClusteringCriteria.NEVER:
+    #if config.use_voronoi:
 
     files = [f for f in os.listdir(config.input_dir) if os.path.isfile(os.path.join(config.input_dir, f))]
 
@@ -256,7 +297,7 @@ def find_voronoi_centroids(diagram_data: DiagramData, generate_intermediate_diag
     diagram_data.pois = pois
 
     if (generate_intermediate_diagram):
-        diagram_data.intermediate_diagram = plot_voronoi(vor, centroids, output_filepath)
+        diagram_data.intermediate_diagram = plot_voronoi(vor, np.array(centroids), output_filepath)
 
     return diagram_data
 
@@ -370,5 +411,20 @@ def find_distances(points: PointList) -> List[float]:
 
 
 if __name__ == '__main__':
-    config = Configuration(poi_version=PoiVersion.ROLLBACK, rollback_threshold=6, use_clustering=ClusteringCriteria.THRESHOLD, clustering_threshold=100, use_voronoi=True, output_intermediate_diagrams=True, input_dir='test/raw', output_dir='test')
+    parser = ArgumentParser(description='Model Comprehension V2')
+
+    parser.add_argument("-c","--Config",required=False,type=str, help="Config file")
+    parser.add_argument("-i","--Input", help="Input Directory", required=True, type=str)
+    parser.add_argument("-o","--Output", help="Output Directory", required=True, type=str)
+    args = parser.parse_args()
+
+    config = args.Config
+    input_dir = args.Input
+    output_dir = args.Output
+
+    config = configuration_creator(config, output_dir, input_dir)
+    if(config == None):
+        print("Error in configuration Setup please try again.")
+        exit(1)
+
     run_all(config)
