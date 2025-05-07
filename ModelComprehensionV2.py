@@ -35,14 +35,14 @@ from yaml import safe_load, YAMLError
 from argparse import ArgumentParser
 
 class PoiVersion(Enum):
-    OCR = 1
-    OPENCV = 2
-    ROLLBACK = 3
+    OCR = "ocr"
+    OPENCV = "opencv"
+    ROLLBACK = "rollback"
 
 class ClusteringCriteria(Enum):
-    ALWAYS = 1
-    NEVER = 2
-    THRESHOLD = 3
+    ALWAYS = "always"
+    NEVER = "never"
+    THRESHOLD = "threshold"
 
 @dataclass
 class Configuration:
@@ -77,24 +77,31 @@ class DiagramData:
     :return: Configuration
     :rtype: Class Configuration
     """
-def configuration_creator(yaml_file_path, output_directory_file_path, input_directory_file_path):
+def configuration_creator(yaml_file_path: str, output_directory_file_path: str, input_directory_file_path: str) -> Configuration:
     configuration = None
-    try:
-        with open(yaml_file_path, 'r') as config_file:
-            config = safe_load(config_file)
-            poi_version = PoiVersion(config['poi_version'])
-            use_clustering = ClusteringCriteria(config['use_clustering'])
-            configuration = Configuration(
-                poi_version=poi_version,
-                rollback_threshold=config['rollback_threshold'],
-                clustering_threshold=config['clustering_threshold'],
-                use_clustering=use_clustering,
-                use_voronoi=config['use_voronoi'],
-                output_intermediate_diagrams=config['output_intermediate_diagrams'],
-                input_dir=input_directory_file_path,
-                output_dir=output_directory_file_path
-                )
-    except FileNotFoundError:
+    if yaml_file_path is not None and os.path.isfile(yaml_file_path):
+        try:
+            with open(yaml_file_path, 'r') as config_file:
+                config = safe_load(config_file)
+                poi_version = PoiVersion(config['poi_version'])
+                use_clustering = ClusteringCriteria(config['clustering_criteria'])
+                configuration = Configuration(
+                    poi_version=poi_version,
+                    rollback_threshold=config['rollback_threshold'],
+                    clustering_threshold=config['clustering_threshold'],
+                    use_clustering=use_clustering,
+                    use_voronoi=config['use_voronoi'],
+                    output_intermediate_diagrams=config['output_intermediate_diagrams'],
+                    input_dir=input_directory_file_path,
+                    output_dir=output_directory_file_path
+                    )
+        except (YAMLError) as exc:
+            print(f"Error parsing YAML file: {exc}")
+            return None  
+        except KeyError as exc: 
+            print(f'Missing configuration key {exc}')
+            return None
+    else:
         poi_version = PoiVersion(PoiVersion.ROLLBACK)
         use_clustering = ClusteringCriteria(ClusteringCriteria.THRESHOLD)
         configuration = Configuration(
@@ -107,11 +114,6 @@ def configuration_creator(yaml_file_path, output_directory_file_path, input_dire
             input_dir=input_directory_file_path,
             output_dir=output_directory_file_path
         )
-    except YAMLError as exc:
-        print(f"Error parsing YAML file: {exc}")
-        return None
-
-
     return configuration
 
 
@@ -130,8 +132,6 @@ def run_all(config: Configuration) -> None:
     poi_directory = ensure_subdirectory(config.output_dir, 'poi')
     cluster_directory = ensure_subdirectory(config.output_dir, 'cluster')
     voronoi_directory = ensure_subdirectory(config.output_dir, 'voronoi')
-    #if config.use_clustering != ClusteringCriteria.NEVER:
-    #if config.use_voronoi:
 
     files = [f for f in os.listdir(config.input_dir) if os.path.isfile(os.path.join(config.input_dir, f))]
 

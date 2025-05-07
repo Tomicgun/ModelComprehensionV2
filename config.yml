@@ -1,24 +1,6 @@
-
-
-
-poi_version: 3
-
-
-
-clustering_criteria: 3
-
-
-
+poi_version: rollback
+clustering_criteria: threshold
 rollback_threshold: 6
-
-
-
 clustering_threshold: 100
-
-
-
 use_voronoi: true
-
-
-
 output_intermediate_diagrams: true
