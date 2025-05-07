@@ -1,24 +1,49 @@
+#This is an example configuration file with default and recommend values for each configurable parameter,
+#please read the documentation carefully for using a certain setting might mean you will have to configure another setting.
+#If you have any issues or concerns please use the GitHub issues section of the repository to notify the authors.
 
-
-
+#poi version specifies what type of search function the program will use
+#When poi_version is set to 1: Only the OCR function will be used to find POIs
+#When poi_version is set to 2: Only Open_cv function will be used to find POIs
+#When poi_version is set to 3: The rollback version will be used where OCR will be used,
+#but if returns less than the rollback threshold will switch to use Open_cv or use which ever
+#method returns the most data points, This does require a rollback_threshold to be given in this file
 poi_version: 3
 
 
-
+#clustering_criteria specifies when the program will cluster using mean shift clustering
+#When clustering_criteria is set to 1: The program will always cluster the input
+#When clustering_criteria is set to 2: The program will never cluster the input
+#When clustering_criteria is set to 3: The program will use a threshold to determine if it needs to cluster the input or not
+#If you use type 3 you must specify a clustering threshold
 clustering_criteria: 3
 
 
-
+#rollback_threshold specifies at what integer number will the program rollback to use Open_cv, basically
+#at what number of data points will the system use the open_cv method instead of OCR. However, the system
+#will always use the data set with the most data points in it, so you might roll back and still use the OCR data set.
+#A lower number means less rollback a higher number means more rollback
 rollback_threshold: 6
 
 
-
+#clustering_threshold specifies at what integer number will the program cluster the data set
+#using mean shift clustering. Lower number means more clustering a higher number means less clustering
 clustering_threshold: 100
 
 
-
+#A flag to specify if the program should cluster the final result using voronoi
+#The default and recommend use is to leave it at true
 use_voronoi: true
 
 
-
+#A flag to specify if the program should output the diagrams of the OCR,Open_cv,Mean shift clustering and voronoi method
+#recommend use is true, and it gives much more information on how the final distances numbers where found, and they are neat
+#diagrams to look at.
 output_intermediate_diagrams: true
+
+#Advanced Settings
+
+#The open_cv_filter_threshold tells the program how larger the box areas need to be for filtering. In the open_cv method
+#it will filter out any boxes found less than this integer number in pixels.
+#A lower number will mean more and smaller boxes, while a larger number means less and larger boxes
+open_cv_filter_threshold: 1000
