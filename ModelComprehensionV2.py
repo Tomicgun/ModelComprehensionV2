@@ -404,11 +404,9 @@ def plot_voronoi(vor: Voronoi, centroids: np.ndarray, filtered_points: np.ndarra
 
 def find_distances(points: PointList) -> List[float]:
     distances = []
-    for point1 in points:
-        for point2 in points:
-            if point1[0] == point2[0] and point1[1] == point2[1]:
-                continue
-            distances.append(np.linalg.norm(np.subtract(point1, point2)))
+    for i in range(len(points)):
+        for j in range(i+1, len(points)):
+            distances.append(np.linalg.norm(np.subtract(points[i], points[j])))
     return distances
 
 
