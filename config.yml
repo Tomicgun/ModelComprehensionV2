@@ -16,7 +16,7 @@ poi_version: rollback
 #         never: The program will never cluster the input
 #         threshold The program will use a threshold to determine if it needs to cluster the input or not
 #with threshold you must specify a clustering threshold
-clustering_criteria: 3
+clustering_criteria: threshold
 
 
 #rollback_threshold specifies at what integer number will the program rollback to use Open_cv, basically
