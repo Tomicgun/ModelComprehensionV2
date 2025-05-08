@@ -3,19 +3,19 @@
 #If you have any issues or concerns please use the GitHub issues section of the repository to notify the authors.
 
 #poi version specifies what type of search function the program will use
-#When poi_version is set to 1: Only the OCR function will be used to find POIs
-#When poi_version is set to 2: Only Open_cv function will be used to find POIs
-#When poi_version is set to 3: The rollback version will be used where OCR will be used,
-#but if returns less than the rollback threshold will switch to use Open_cv or use which ever
-#method returns the most data points, This does require a rollback_threshold to be given in this file
-poi_version: 3
+#options: ocr: Only the OCR function will be used to find POIs
+#         opencv: Only Open_cv function will be used to find POIs
+#         rollback: The rollback version will be used where OCR will be used,
+#                   but if returns less than the rollback threshold will switch to use Open_cv or use which ever
+#                   method returns the most data points, This does require a rollback_threshold to be given in this file
+poi_version: rollback
 
 
 #clustering_criteria specifies when the program will cluster using mean shift clustering
-#When clustering_criteria is set to 1: The program will always cluster the input
-#When clustering_criteria is set to 2: The program will never cluster the input
-#When clustering_criteria is set to 3: The program will use a threshold to determine if it needs to cluster the input or not
-#If you use type 3 you must specify a clustering threshold
+#options: always: The program will always cluster the input
+#         never: The program will never cluster the input
+#         threshold The program will use a threshold to determine if it needs to cluster the input or not
+#with threshold you must specify a clustering threshold
 clustering_criteria: 3
 
 
