@@ -1,26 +1,129 @@
 # ModelComprehension
 
+## Getting started
+
+### Setup
+You need to download Python 3.* or greater to your machine, then download ModelComprehension.py. That is technically all you need
+to be able to run this program.
+
+### How to use
+You can then start the CLI interface that you can then enter your commands into. The command only has three arguments
+the path to the config file which is optional. Then the path to the output and input directory which is required. It is recommended 
+to use either the default values or the provided config.yml file, however you are welcome to edit or create your own configuration file
+to customize the program to your needs. The provided config explains all the parameters and what they do allowing you to edit to your
+hearts content without accidentally breaking anything.
+
+That is all you need to run and use this program!
+
+## Introduction
+This project is part of a larger research effort focused on model comprehension — specifically, understanding what makes a good UML diagram.
+As part of this research, we analyzed over 700 diagrams across a variety of metrics, one of the most important being model density.
+
+Manually calculating model density for a large number of diagrams would have been completely impractical, 
+which led to the idea of building a program that could measure density quickly, reliably, and consistently. 
+From that idea, this project was born. We aimed to calculate the average distance between elements to determine how dense or sparse a diagram was. 
+Using a combination of OCR, OpenCV, mean shift clustering, and Voronoi tessellation, we identified the center points of broad regions within each 
+diagram—based on either textual or structural elements. These center points were then used to calculate distances and standard deviation, 
+forming the basis of what we define as diagram density.
+
+## Design
+
+This section covers why we designed the program the way we did and how it works in more detail.
+
+The **Model Comprehension** program consists of three broad steps:  
+1. Finding points of interest  
+2. Clustering using Voronoi tessellation  
+3. Calculating the average distance and standard deviation  
+
+---
+
+### Finding Points of Interest
+
+**Definition:** *Points of interest* are texts, boxes, or nodes in a diagram that hold significant semantic or contextual information for understanding the diagram.
+
+We identify these points using two main methods:
+
+1. OCR from the `doctr` library  
+2. An OpenCV method to detect structural elements  
+
+#### Why OCR?
+
+OCR is excellent at detecting text. We found no better method for reliably identifying textual elements without using a neural network. OCR only occasionally failed, typically when the diagram was very large and low resolution. In those cases, we fall back on an OpenCV-based method.
+
+#### The OpenCV Method
+
+This method uses several techniques:
+
+- `getStructuringElement` is used to detect the edges of shapes or elements.
+- The result is then **dilated** to enhance the structures.
+- `findContours` is used to identify regions of interest.
+- A **threshold** is applied to remove small artifacts that may skew results.
+
+Altogether, this process results in clean and usable outputs.
+
+#### Why a Fallback Method? Why OpenCV?
+
+- The fallback ensures that **some data is always extracted** from every diagram.
+- In the default configuration, **both methods run**, and we use the one that produces more data.
+- OpenCV is a widely used Python library with **strong community support**, **comprehensive documentation**, and is relatively **easy to work with**.
+
+#### Optional: Clustering with Mean Shift
+
+We optionally apply **mean shift clustering** to the data (from either method).
+
+- It automatically determines the number of clusters.
+- It smooths out artifacts and reduces the number of data points.
+- Especially useful when diagrams have a large number of points (>100).
+
+---
+
+### Clustering Using Voronoi Tessellation
+
+We use a custom **bounded tessellation method** based on SciPy’s Voronoi implementation.
+
+- It finds **regions** and their **geographic center points**.
+- These centers are used to calculate **average distances** and **standard deviation**.
+
+#### Why Voronoi Tessellation?
+
+- It partitions data into regions or clusters.
+- A few isolated nodes shouldn’t suggest high density.
+- Many tightly packed nodes should indicate density.
+- Voronoi helps visualize clustering and spread of points of interest.
+
+---
+
+### Calculating Average Distance and Standard Deviation
+
+In the final step:
+
+1. We calculate the **average distance** from each center point to every other.
+2. We do this for all points.
+3. We then compute the **overall average** of these distances and their **standard deviation**.
+
+This provides a metric for **diagram density**, or inversely:
+
+- **High average distance** = Low density  
+- **Low average distance** = High density
+
+## Procedure
+
+Step by step how the program runs for each diagram given to it.
+
+* For every pdf file it creates a png file
+* For every png file it then runs an optical character recognition (OCR)  method
+* If the OCR returns less than 6 POIs it then runs an open cv method
+* The algorithm then uses the method that returns the most POI’s.
+* If the number of POI’s is larger than 100 it will use mean shift clustering to reduce the number of POI’s
+* using the data from the above steps, the algorithm uses a custom voronoi method to find voronoi center points. 
+* These voronoi center points are used to calculate average distance, and standard deviation of the distances.
+
+
 ## Authors
 Thomas Marten <br>
 Kritika Parajuli <br>
+Jeremiah Hubbard <br>
 Prof. Dr. Bastian Tenbergen <br>
-
-## Description
-
-This program's main goal is to take a pdf of software engineering diagrams and be able to pick out nodes/elements on these diagrams, find the center points of these nodes/elements, and put these center points through a Voronoi tessellation. Find the center points of the tessellation clusters and find the average distance standard deviation between these center points. 
-
-* Give the program a pdf name, pdf file location and blur integer
-* The program checks if the pdf is a valid pdf
-* The program then converts the pdf to a png
-* The program then converts the png to grayscale applies and a gaussian blur
-* The program then applies a open cv inverse binary threshold
-* The program then applies a open cv method for finding the contours of the png
-* The program then finds the center point of every contour from the previous step found
-* The program then uses the center points from the previous step in a Kmeans cluster algorithm
-* The program then finds the center points of the K Means clusters
-* The program then uses the center points from the previous step and creates a Voronoi tessellation graph from a custom Voronoi method
-* The program then finds the center points of the Voronoi tessellation clusters
-* The program then uses the center points from the previous step and calculates the average distance and standard deviation from the center points tessellation graph.
 
 ## Sources
 https://hpaulkeeler.com/voronoi-dirichlet-tessellations/ <br>
@@ -46,3 +149,13 @@ https://www.w3schools.com/python/pandas/pandas_csv.asp <br>
 https://www.tutorialspoint.com/how-to-write-a-single-line-in-text-file-using-python <br>
 
 https://www.w3schools.com/python/python_ml_k-means.asp <br>
+
+https://stackoverflow.com/questions/37771263/detect-text-area-in-an-image-using-python-and-opencv <br>
+
+https://pymupdf.readthedocs.io/en/latest/ <br>
+
+https://developers.mindee.com/docs/api-documentation <br>
+
+https://docs.python.org/3/library/argparse.html <br>
+
+https://docs.opencv.org/4.x/d6/d00/tutorial_py_root.html <br>
