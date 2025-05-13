@@ -18,6 +18,14 @@ to be able to run this program.
 
    ```bash
    python ModelComprehensionV2.py
+   ```
+
+   or
+
+   ```bash
+   python3 ModelComprehensionV2.py
+   ```
+   
 
 #### Using the CLI Tool
 Once the CLI is running, you’ll have full access to the system's functionality. The command accepts three arguments:
