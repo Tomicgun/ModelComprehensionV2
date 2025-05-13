@@ -10,7 +10,7 @@ to be able to run this program.
 
 #### Running the Command Line Interface (CLI) Tool
 
-1. Download the final release version from [here](https://github.com/Tomicgun/ModelComprehensionV2)
+1. Download the final release version from [here](https://github.com/Tomicgun/ModelComprehensionV2/releases/tag/Final)
 2. Unzip the package into a directory of your choice using any unzipping tool.
 3. Open your preferred terminal application (e.g., Command Prompt, PowerShell, or any other terminal).
 4. Navigate to the directory where you extracted the files.
