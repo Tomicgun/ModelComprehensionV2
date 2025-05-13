@@ -3,7 +3,7 @@
 ## Getting started
 
 ### Setup
-You need to download Python 3.* or greater to your machine, then download ModelComprehension.py. That is technically all you need
+You need to download Python 3.* or greater to your machine, then download ModelComprehension.py. That all you need
 to be able to run this program.
 
 ### How to use
