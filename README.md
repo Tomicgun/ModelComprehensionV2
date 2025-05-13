@@ -6,12 +6,27 @@
 You need to download Python 3.* or greater to your machine, then download ModelComprehension.py. That all you need
 to be able to run this program.
 
-### How to use
-You can then start the CLI interface that you can then enter your commands into. The command only has three arguments
-the path to the config file which is optional. Then the path to the output and input directory which is required. It is recommended 
-to use either the default values or the provided config.yml file, however you are welcome to edit or create your own configuration file
-to customize the program to your needs. The provided config explains all the parameters and what they do allowing you to edit to your
-hearts content without accidentally breaking anything.
+### How to Use
+
+#### Running the Command Line Interface (CLI) Tool
+
+1. Download the final release version from ![here](https://github.com/Tomicgun/ModelComprehensionV2)
+2. Unzip the package into a directory of your choice using any unzipping tool.
+3. Open your preferred terminal application (e.g., Command Prompt, PowerShell, or any other terminal).
+4. Navigate to the directory where you extracted the files.
+5. Run the CLI tool using one of the following commands, depending on your system setup:
+
+   ```bash
+   python ModelComprehensionV2.py
+
+#### Using the CLI Tool
+Once the CLI is running, you’ll have full access to the system's functionality. The command accepts three arguments:
+* An optional path to a configuration file (config.yml)
+* A required input directory path
+* A required output directory path
+
+We recommend using the provided config.yml file or the default values. However, you are free to edit or create your own configuration file to customize the tool to your specific needs. 
+The included configuration file contains detailed explanations of all parameters, allowing safe and flexible customization without breaking functionality.
 
 That is all you need to run and use this program!
 
